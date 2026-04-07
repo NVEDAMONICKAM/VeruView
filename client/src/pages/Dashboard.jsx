@@ -72,8 +72,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     getTrees()
-      .then((res) => setTrees(res.data))
-      .catch(() => {})
+      .then((res) => setTrees(Array.isArray(res.data) ? res.data : []))
+      .catch(() => setTrees([]))
       .finally(() => setLoading(false));
   }, []);
 

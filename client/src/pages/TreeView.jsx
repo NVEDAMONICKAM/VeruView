@@ -35,9 +35,11 @@ export default function TreeView() {
       .then((res) => {
         const t = res.data;
         setTree(t);
-        setPeople(t.people);
-        setRelationships(t.relationships);
-        if (t.people.length > 0 && !perspectiveId) setPerspectiveId(t.people[0].id);
+        const people = Array.isArray(t.people) ? t.people : [];
+        const rels = Array.isArray(t.relationships) ? t.relationships : [];
+        setPeople(people);
+        setRelationships(rels);
+        if (people.length > 0 && !perspectiveId) setPerspectiveId(people[0].id);
       })
       .catch((err) => {
         if (err.response?.status === 404) navigate('/');

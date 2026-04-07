@@ -18,8 +18,9 @@ export default function SharedTreeView() {
     getSharedTree(token)
       .then((res) => {
         const t = res.data;
-        setTree(t);
-        if (t.people.length > 0) setPerspectiveId(t.people[0].id);
+        const people = Array.isArray(t.people) ? t.people : [];
+        setTree({ ...t, people, relationships: Array.isArray(t.relationships) ? t.relationships : [] });
+        if (people.length > 0) setPerspectiveId(people[0].id);
       })
       .catch(() => setError('This share link is invalid or has expired.'))
       .finally(() => setLoading(false));
