@@ -20,10 +20,13 @@ export default function Register() {
     setLoading(true);
     try {
       const res = await register({ name, email, password });
+      if (!res.data?.id) throw new Error('Invalid response');
       setUser(res.data);
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.error || 'Registration failed');
+      setError(typeof err.response?.data?.error === 'string'
+        ? err.response.data.error
+        : 'Registration failed');
     } finally {
       setLoading(false);
     }

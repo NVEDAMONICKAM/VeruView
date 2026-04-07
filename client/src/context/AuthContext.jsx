@@ -9,7 +9,12 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     getMe()
-      .then((res) => setUser(res.data))
+      .then((res) => {
+        // Guard: only treat the response as a valid user if it has an id field.
+        // Protects against error objects (e.g. { code, message }) being stored as user.
+        const data = res.data;
+        setUser(data?.id ? data : null);
+      })
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
   }, []);

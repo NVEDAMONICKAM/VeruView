@@ -21,10 +21,13 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await login({ email, password });
+      if (!res.data?.id) throw new Error('Invalid response');
       setUser(res.data);
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed');
+      setError(typeof err.response?.data?.error === 'string'
+        ? err.response.data.error
+        : 'Login failed');
     } finally {
       setLoading(false);
     }
