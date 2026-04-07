@@ -94,7 +94,7 @@ export default function TopBar({ tree, perspectiveName, onTreeUpdate, isReadOnly
                 if (e.key === 'Enter') handleNameSave();
                 if (e.key === 'Escape') setEditingName(false);
               }}
-              className="border border-veru-accent rounded px-2 py-0.5 text-sm font-semibold text-veru-dark focus:outline-none max-w-[160px] sm:max-w-xs"
+              className="border border-veru-accent rounded px-2 py-0.5 text-sm font-semibold text-gray-900 bg-white focus:outline-none max-w-[160px] sm:max-w-xs"
             />
           ) : (
             <button

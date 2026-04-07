@@ -97,7 +97,7 @@ export default function Dashboard() {
   }
 
   async function handleLogout() {
-    await logout();
+    try { await logout(); } catch { /* ignore — still clear local state */ }
     setUser(null);
     navigate('/login');
   }
@@ -155,12 +155,12 @@ export default function Dashboard() {
                 onChange={(e) => setNewName(e.target.value)}
                 autoFocus
                 placeholder="e.g. Murugan Family Tree"
-                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-veru-accent"
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-veru-accent"
               />
               <select
                 value={newCulture}
                 onChange={(e) => setNewCulture(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-veru-accent"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-veru-accent"
               >
                 <option value="ENGLISH">English labels</option>
                 <option value="TAMIL">Tamil labels (தமிழ்)</option>

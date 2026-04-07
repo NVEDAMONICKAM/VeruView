@@ -116,7 +116,7 @@ export default function PersonModal({ person, onSave, onDelete, onClose }) {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-veru-accent focus:ring-1 focus:ring-veru-accent bg-white"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 bg-white focus:outline-none focus:border-veru-accent focus:ring-1 focus:ring-veru-accent"
               placeholder="e.g. Murugan Selvam"
               autoFocus
             />
@@ -129,7 +129,7 @@ export default function PersonModal({ person, onSave, onDelete, onClose }) {
               type="date"
               value={dob}
               onChange={(e) => setDob(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-veru-accent focus:ring-1 focus:ring-veru-accent bg-white"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 bg-white focus:outline-none focus:border-veru-accent focus:ring-1 focus:ring-veru-accent"
             />
           </div>
 
