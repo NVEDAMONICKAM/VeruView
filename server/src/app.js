@@ -11,7 +11,8 @@ const session    = require('express-session');
 const passport   = require('passport');
 const cors       = require('cors');
 const path       = require('path');
-const connectPg  = require('connect-pg-simple');
+const { PrismaSessionStore } = require('@quixo3/prisma-session-store');
+const prismaForSession = require('./lib/prisma');
 
 const authRoutes         = require('./routes/auth');
 const treeRoutes         = require('./routes/trees');
@@ -40,14 +41,11 @@ app.use(express.urlencoded({ extended: true }));
 // ---------------------------------------------------------------------------
 // Session store (PostgreSQL)
 // ---------------------------------------------------------------------------
-const PgSession = connectPg(session);
-
 app.use(
   session({
-    store: new PgSession({
-      conString: process.env.DATABASE_URL,
-      tableName: 'session',
-      createTableIfMissing: true,
+    store: new PrismaSessionStore(prismaForSession, {
+      checkPeriod: 2 * 60 * 1000,
+      dbRecordIdIsSessionId: true,
     }),
     secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
     resave: false,

@@ -84,6 +84,13 @@ model Relationship {
   @@unique([fromPersonId, toPersonId, type])
 }
 
+model Session {
+  id        String   @id
+  sid       String   @unique
+  data      String
+  expiresAt DateTime
+}
+
 // Allows users to override specific kinship labels per tree
 model TitleOverride {
   id              String     @id @default(uuid())
