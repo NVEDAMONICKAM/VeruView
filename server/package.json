@@ -14,7 +14,8 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
-    "@prisma/client": "^5.10.0",
+    "@prisma/client": "^5.22.0",
+    "prisma": "^5.22.0",
     "bcryptjs": "^2.4.3",
     "connect-pg-simple": "^9.0.1",
     "cors": "^2.8.5",
@@ -28,7 +29,6 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0",
-    "prisma": "^5.10.0"
+    "nodemon": "^3.1.0"
   }
 }
