@@ -9,7 +9,6 @@
  * with Vercel Blob (https://vercel.com/docs/storage/vercel-blob) or
  * AWS S3 and update server/src/routes/people.js accordingly.
  */
-require('dotenv').config();
 const app = require('../server/src/app');
 
 module.exports = app;
