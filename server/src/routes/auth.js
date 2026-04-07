@@ -54,18 +54,27 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
             where: { OR: [{ googleId: profile.id }, { email }] },
           });
 
+          const googleName =
+            profile.displayName ||
+            [profile.name?.givenName, profile.name?.familyName].filter(Boolean).join(' ') ||
+            'Google User';
+
           if (!user) {
             user = await prisma.user.create({
               data: {
-                name: profile.displayName,
+                name: googleName,
                 email,
                 googleId: profile.id,
               },
             });
-          } else if (!user.googleId) {
+          } else {
+            // Link Google account and fill in name if missing
             user = await prisma.user.update({
               where: { id: user.id },
-              data: { googleId: profile.id },
+              data: {
+                googleId: profile.id,
+                ...((!user.name || user.name === 'Google User') && { name: googleName }),
+              },
             });
           }
           return done(null, user);
