@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
+  <rect width="72" height="72" rx="16" fill="#D4EDDA"/>
+  <!-- Left leaf -->
+  <ellipse cx="26" cy="14" rx="4" ry="9" fill="#A8D5B5" transform="rotate(-32 26 14)"/>
+  <!-- Right leaf -->
+  <ellipse cx="46" cy="14" rx="4" ry="9" fill="#6BAF8C" transform="rotate(32 46 14)"/>
+  <!-- VV -->
+  <text x="36" y="62" text-anchor="middle" font-family="Georgia, serif" font-size="40" font-weight="bold" fill="#6BAF8C" letter-spacing="-3">VV</text>
+</svg>

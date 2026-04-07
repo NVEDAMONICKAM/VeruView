@@ -1,0 +1,270 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import {
+  getTree, createPerson, updatePerson, deletePerson,
+  createRelationship, deleteRelationship, getKinship,
+} from '../api/client';
+import TopBar from '../components/TopBar';
+import TreeCanvas from '../components/TreeCanvas';
+import PersonModal from '../components/PersonModal';
+import RelationshipModal from '../components/RelationshipModal';
+
+export default function TreeView() {
+  const { id }    = useParams();
+  const navigate  = useNavigate();
+
+  const [tree,          setTree]          = useState(null);
+  const [people,        setPeople]        = useState([]);
+  const [relationships, setRelationships] = useState([]);
+  const [kinship,       setKinship]       = useState({});
+  const [perspectiveId, setPerspectiveId] = useState(null);
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState('');
+
+  // Mobile sidebar drawer
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Modal state
+  const [personModal, setPersonModal] = useState(null);
+  const [relModal,    setRelModal]    = useState(null);
+
+  // Load tree
+  useEffect(() => {
+    setLoading(true);
+    getTree(id)
+      .then((res) => {
+        const t = res.data;
+        setTree(t);
+        setPeople(t.people);
+        setRelationships(t.relationships);
+        if (t.people.length > 0 && !perspectiveId) setPerspectiveId(t.people[0].id);
+      })
+      .catch((err) => {
+        if (err.response?.status === 404) navigate('/');
+        else setError('Failed to load tree');
+      })
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  // Load kinship titles
+  useEffect(() => {
+    if (!perspectiveId || !tree) return;
+    getKinship(id, perspectiveId)
+      .then((res) => setKinship(res.data))
+      .catch(() => {});
+  }, [perspectiveId, tree?.culture, people.length, relationships.length]);
+
+  // Person CRUD
+  async function handleSavePerson(fd) {
+    if (personModal?.person) {
+      const res = await updatePerson(id, personModal.person.id, fd);
+      setPeople((prev) => prev.map((p) => (p.id === res.data.id ? res.data : p)));
+    } else {
+      const res = await createPerson(id, fd);
+      setPeople((prev) => [...prev, res.data]);
+      if (people.length === 0) setPerspectiveId(res.data.id);
+    }
+  }
+
+  async function handleDeletePerson() {
+    const personId = personModal?.person?.id;
+    if (!personId) return;
+    await deletePerson(id, personId);
+    setPeople((prev) => prev.filter((p) => p.id !== personId));
+    setRelationships((prev) =>
+      prev.filter((r) => r.fromPersonId !== personId && r.toPersonId !== personId)
+    );
+    if (perspectiveId === personId) {
+      const remaining = people.filter((p) => p.id !== personId);
+      setPerspectiveId(remaining[0]?.id ?? null);
+    }
+  }
+
+  // Relationship CRUD
+  async function handleSaveRelationship(data) {
+    const res = await createRelationship(id, data);
+    setRelationships((prev) => [...prev, res.data]);
+  }
+
+  async function handleDeleteRelationship() {
+    const relId = relModal?.relationship?.relId;
+    if (!relId) return;
+    await deleteRelationship(id, relId);
+    setRelationships((prev) => prev.filter((r) => r.id !== relId));
+  }
+
+  const handleEdgeClick = useCallback((edgeData) => {
+    if (!edgeData) return;
+    setRelModal({ relationship: edgeData });
+  }, []);
+
+  const perspectivePerson = people.find((p) => p.id === perspectiveId);
+
+  // Shared sidebar content (used in both desktop aside and mobile drawer)
+  function SidebarContent({ onClose }) {
+    return (
+      <>
+        <div className="p-3 border-b border-veru-light">
+          <button
+            onClick={() => { setPersonModal({ person: null }); onClose?.(); }}
+            className="w-full bg-earth-terra hover:bg-earth-terraDark text-white text-sm font-semibold py-2.5 rounded-xl transition-colors min-h-[44px]"
+          >
+            + Add Person
+          </button>
+        </div>
+        <div className="p-3 border-b border-veru-light">
+          <button
+            onClick={() => { setRelModal({ relationship: null }); onClose?.(); }}
+            disabled={people.length < 2}
+            className="w-full bg-earth-warmWhite hover:bg-veru-light text-veru-dark text-sm font-medium py-2.5 rounded-xl border border-veru-mid transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+          >
+            + Add Relationship
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2">
+          <p className="text-[10px] uppercase tracking-widest text-gray-400 font-semibold px-2 py-1">
+            People ({people.length})
+          </p>
+          {people.map((person) => (
+            <button
+              key={person.id}
+              onClick={() => { setPerspectiveId(person.id); onClose?.(); }}
+              className={`w-full text-left px-3 py-2.5 rounded-xl text-sm mb-0.5 transition-colors flex items-center gap-2 min-h-[44px]
+                ${perspectiveId === person.id
+                  ? 'bg-veru-accent text-white font-semibold'
+                  : 'text-gray-700 hover:bg-veru-light'
+                }`}
+            >
+              <span className={`w-2 h-2 rounded-full flex-shrink-0
+                ${person.gender === 'MALE' ? 'bg-blue-300' : person.gender === 'FEMALE' ? 'bg-earth-rose' : 'bg-gray-300'}`}
+              />
+              <span className="truncate">{person.name}</span>
+            </button>
+          ))}
+        </div>
+        <div className="p-3 border-t border-veru-light">
+          <p className="text-[10px] text-gray-400 text-center leading-snug">
+            Click a node to switch perspective · Double-click to edit
+          </p>
+        </div>
+      </>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-veru-light">
+        <div className="w-10 h-10 border-4 border-veru-accent border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-veru-light gap-4">
+        <p className="text-red-500">{error}</p>
+        <Link to="/" className="text-veru-accent hover:underline text-sm">← Back to dashboard</Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-screen bg-veru-light">
+      <TopBar tree={tree} perspectiveName={perspectivePerson?.name} onTreeUpdate={setTree} />
+
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Desktop sidebar */}
+        <aside className="hidden sm:flex w-52 bg-earth-warmWhite border-r border-veru-mid flex-col shadow-sm z-10 flex-shrink-0">
+          <SidebarContent />
+        </aside>
+
+        {/* Mobile drawer overlay */}
+        {drawerOpen && (
+          <div className="sm:hidden fixed inset-0 z-40 flex">
+            <div className="flex-1 bg-black/40" onClick={() => setDrawerOpen(false)} />
+            <div className="w-64 bg-earth-warmWhite flex flex-col h-full shadow-xl border-l border-veru-mid">
+              {/* Drawer header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-veru-light">
+                <span className="text-sm font-semibold text-veru-dark">Tree Menu</span>
+                <button
+                  onClick={() => setDrawerOpen(false)}
+                  className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 text-xl"
+                >
+                  ×
+                </button>
+              </div>
+              <SidebarContent onClose={() => setDrawerOpen(false)} />
+            </div>
+          </div>
+        )}
+
+        {/* Canvas */}
+        <main className="flex-1 overflow-hidden">
+          {people.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center gap-3 p-8">
+              <svg width="64" height="64" viewBox="0 0 64 64" className="opacity-30">
+                <circle cx="32" cy="20" r="10" fill="#6BAF8C"/>
+                <line x1="32" y1="30" x2="32" y2="54" stroke="#6BAF8C" strokeWidth="2"/>
+                <line x1="20" y1="42" x2="44" y2="42" stroke="#6BAF8C" strokeWidth="2"/>
+              </svg>
+              <p className="text-veru-dark font-medium">No people in this tree yet</p>
+              <p className="text-gray-400 text-sm">Tap "Add Person" to get started</p>
+              <button
+                onClick={() => setPersonModal({ person: null })}
+                className="mt-2 bg-earth-terra hover:bg-earth-terraDark text-white text-sm font-semibold px-5 py-2.5 rounded-xl transition-colors min-h-[44px]"
+              >
+                Add First Person
+              </button>
+            </div>
+          ) : (
+            <TreeCanvas
+              people={people}
+              relationships={relationships}
+              kinship={kinship}
+              perspectiveId={perspectiveId}
+              culture={tree?.culture}
+              isReadOnly={false}
+              onPerspectiveChange={setPerspectiveId}
+              onEditPerson={(person) => setPersonModal({ person })}
+              onEdgeClick={handleEdgeClick}
+            />
+          )}
+        </main>
+
+        {/* Mobile FAB — opens sidebar drawer */}
+        <button
+          className="sm:hidden fixed bottom-6 right-6 z-30 w-14 h-14 bg-earth-terra hover:bg-earth-terraDark text-white rounded-full shadow-lg flex items-center justify-center transition-colors"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open tree menu"
+        >
+          {/* Person + plus icon */}
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="9" cy="7" r="3"/>
+            <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
+            <line x1="19" y1="8" x2="19" y2="14"/>
+            <line x1="16" y1="11" x2="22" y2="11"/>
+          </svg>
+        </button>
+      </div>
+
+      {/* Modals */}
+      {personModal && (
+        <PersonModal
+          person={personModal.person}
+          onSave={handleSavePerson}
+          onDelete={personModal.person ? handleDeletePerson : undefined}
+          onClose={() => setPersonModal(null)}
+        />
+      )}
+      {relModal && (
+        <RelationshipModal
+          people={people}
+          relationship={relModal.relationship}
+          onSave={handleSaveRelationship}
+          onDelete={handleDeleteRelationship}
+          onClose={() => setRelModal(null)}
+        />
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String       @id @default(uuid())
+  name         String
+  email        String       @unique
+  passwordHash String?
+  googleId     String?      @unique
+  createdAt    DateTime     @default(now())
+  trees        FamilyTree[]
+}
+
+enum Culture {
+  ENGLISH
+  TAMIL
+}
+
+model FamilyTree {
+  id        String         @id @default(uuid())
+  name      String
+  ownerId   String
+  owner     User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  culture   Culture        @default(ENGLISH)
+  createdAt DateTime       @default(now())
+
+  people        Person[]
+  relationships Relationship[]
+  shares        TreeShare[]
+  titleOverrides TitleOverride[]
+}
+
+model TreeShare {
+  id         String     @id @default(uuid())
+  treeId     String
+  tree       FamilyTree @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  shareToken String     @unique
+  createdAt  DateTime   @default(now())
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+model Person {
+  id        String     @id @default(uuid())
+  treeId    String
+  tree      FamilyTree @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  name      String
+  dob       DateTime?
+  gender    Gender     @default(OTHER)
+  photoUrl  String?
+  createdAt DateTime   @default(now())
+
+  fromRelationships Relationship[] @relation("FromPerson")
+  toRelationships   Relationship[] @relation("ToPerson")
+}
+
+enum RelationshipType {
+  PARENT  // fromPerson IS A PARENT OF toPerson
+  CHILD   // fromPerson IS A CHILD OF toPerson
+  SPOUSE  // bidirectional
+  SIBLING // bidirectional
+}
+
+model Relationship {
+  id           String           @id @default(uuid())
+  treeId       String
+  tree         FamilyTree       @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  fromPersonId String
+  fromPerson   Person           @relation("FromPerson", fields: [fromPersonId], references: [id], onDelete: Cascade)
+  toPersonId   String
+  toPerson     Person           @relation("ToPerson", fields: [toPersonId], references: [id], onDelete: Cascade)
+  type         RelationshipType
+
+  @@unique([fromPersonId, toPersonId, type])
+}
+
+// Allows users to override specific kinship labels per tree
+model TitleOverride {
+  id              String     @id @default(uuid())
+  treeId          String
+  tree            FamilyTree @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  // relationshipKey matches the keys in the kinship calculator (e.g. "father", "olderBrother")
+  relationshipKey String
+  culture         Culture
+  script          String?    // Native script (e.g. Tamil script)
+  transliteration String?
+  english         String?
+
+  @@unique([treeId, relationshipKey, culture])
+}

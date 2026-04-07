@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-sans bg-veru-light text-gray-800 min-h-screen;
+  }
+
+  /* Dark mode base */
+  @media (prefers-color-scheme: dark) {
+    body {
+      @apply bg-earth-warmDark text-gray-100;
+    }
+  }
+}
+
+/* React Flow overrides */
+.react-flow__background {
+  background-color: #f0f9f4;
+}
+
+.react-flow__controls button {
+  background: #FDFAF5;
+  border: 1px solid #A8D5B5;
+  color: #3A7D5C;
+}
+.react-flow__controls button:hover {
+  background: #D4EDDA;
+}
+
+/* Ensure edge labels don't steal pointer events when hidden */
+.react-flow__edge-textwrapper {
+  pointer-events: none;
+}
+.react-flow__edge.selected .react-flow__edge-textwrapper,
+.react-flow__edge:hover .react-flow__edge-textwrapper {
+  pointer-events: auto;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f0f9f4; }
+::-webkit-scrollbar-thumb { background: #A8D5B5; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #6BAF8C; }
+
+/* Mobile: prevent input zoom on iOS (inputs need font-size >= 16px) */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
