@@ -1,9 +1,9 @@
 /**
  * kinship.js — Cultural kinship title calculator for VeruView
  *
- * Given a "perspective" person and all people+relationships in a tree,
- * this module returns a kinship key for each person (e.g. "father", "olderSister")
- * and then maps that key to a culture-specific display title.
+ * Traverses the entire relationship graph via BFS from the perspective person,
+ * deriving kinship titles for every reachable person — not just direct edges.
+ * Siblings are derived from shared parents (no SIBLING edge required).
  *
  * HOW TO ADD A NEW CULTURE (e.g. Hindi, Telugu, Malayalam):
  *  1. Add a new entry to CULTURE_TITLES below with the same keys as TAMIL_TITLES.
@@ -15,58 +15,56 @@
 // Tamil kinship title definitions (relative to perspective person)
 // ---------------------------------------------------------------------------
 const TAMIL_TITLES = {
-  father:               { script: 'அப்பா',      transliteration: 'Appā',       english: 'Father' },
-  mother:               { script: 'அம்மா',      transliteration: 'Ammā',       english: 'Mother' },
+  father:               { script: 'அப்பா',      transliteration: 'Appā',        english: 'Father' },
+  mother:               { script: 'அம்மா',      transliteration: 'Ammā',        english: 'Mother' },
 
-  olderBrother:         { script: 'அண்ணன்',     transliteration: 'Aṇṇan',      english: 'Older Brother' },
-  youngerBrother:       { script: 'தம்பி',       transliteration: 'Tambi',      english: 'Younger Brother' },
-  brother:              { script: 'சகோதரன்',     transliteration: 'Sakōtaran',  english: 'Brother' }, // fallback when DOB unknown
-  olderSister:          { script: 'அக்கா',       transliteration: 'Akkā',       english: 'Older Sister' },
-  youngerSister:        { script: 'தங்கை',       transliteration: 'Taṅkai',     english: 'Younger Sister' },
-  sister:               { script: 'சகோதரி',      transliteration: 'Sakōtari',   english: 'Sister' },  // fallback
+  olderBrother:         { script: 'அண்ணன்',     transliteration: 'Aṇṇan',       english: 'Older Brother' },
+  youngerBrother:       { script: 'தம்பி',       transliteration: 'Tambi',       english: 'Younger Brother' },
+  brother:              { script: 'சகோதரன்',     transliteration: 'Sakōtaran',   english: 'Brother' },
+  olderSister:          { script: 'அக்கா',       transliteration: 'Akkā',        english: 'Older Sister' },
+  youngerSister:        { script: 'தங்கை',       transliteration: 'Taṅkai',      english: 'Younger Sister' },
+  sister:               { script: 'சகோதரி',      transliteration: 'Sakōtari',    english: 'Sister' },
 
-  // Paternal grandparents
-  paternalGrandfather:  { script: 'தாத்தா',      transliteration: 'Tāttā',      english: 'Grandfather (Paternal)' },
-  paternalGrandmother:  { script: 'பாட்டி',       transliteration: 'Pāṭṭi',      english: 'Grandmother (Paternal)' },
-  // Maternal grandparents
-  maternalGrandfather:  { script: 'தாத்தா',      transliteration: 'Tāttā',      english: 'Grandfather (Maternal)' },
-  maternalGrandmother:  { script: 'பாட்டி',       transliteration: 'Pāṭṭi',      english: 'Grandmother (Maternal)' },
-  grandfather:          { script: 'தாத்தா',      transliteration: 'Tāttā',      english: 'Grandfather' }, // fallback
-  grandmother:          { script: 'பாட்டி',       transliteration: 'Pāṭṭi',      english: 'Grandmother' }, // fallback
+  paternalGrandfather:  { script: 'தாத்தா',      transliteration: 'Tāttā',       english: 'Grandfather (Paternal)' },
+  paternalGrandmother:  { script: 'பாட்டி',       transliteration: 'Pāṭṭi',       english: 'Grandmother (Paternal)' },
+  maternalGrandfather:  { script: 'தாத்தா',      transliteration: 'Tāttā',       english: 'Grandfather (Maternal)' },
+  maternalGrandmother:  { script: 'பாட்டி',       transliteration: 'Pāṭṭi',       english: 'Grandmother (Maternal)' },
+  grandfather:          { script: 'தாத்தா',      transliteration: 'Tāttā',       english: 'Grandfather' },
+  grandmother:          { script: 'பாட்டி',       transliteration: 'Pāṭṭi',       english: 'Grandmother' },
 
-  // Father's siblings
-  fathersOlderBrother:  { script: 'பெரியப்பா',   transliteration: 'Periyappā',  english: "Father's Older Brother" },
-  fathersYoungerBrother:{ script: 'சித்தப்பா',   transliteration: 'Chittappā',  english: "Father's Younger Brother" },
-  fathersBrother:       { script: 'சித்தப்பா',   transliteration: 'Chittappā',  english: "Father's Brother" }, // fallback
-  fathersSister:        { script: 'அத்தை',       transliteration: 'Attai',      english: "Father's Sister" },
+  fathersOlderBrother:  { script: 'பெரியப்பா',   transliteration: 'Periyappā',   english: "Father's Older Brother" },
+  fathersYoungerBrother:{ script: 'சித்தப்பா',   transliteration: 'Chittappā',   english: "Father's Younger Brother" },
+  fathersBrother:       { script: 'சித்தப்பா',   transliteration: 'Chittappā',   english: "Father's Brother" },
+  fathersSister:        { script: 'அத்தை',       transliteration: 'Attai',       english: "Father's Sister" },
 
-  // Mother's siblings
-  mothersBrother:       { script: 'மாமா',         transliteration: 'Māmā',       english: "Mother's Brother" },
-  mothersOlderSister:   { script: 'அத்தை',       transliteration: 'Attai',      english: "Mother's Older Sister" },
-  mothersYoungerSister: { script: 'சித்தி',       transliteration: 'Chitti',     english: "Mother's Younger Sister" },
-  mothersSister:        { script: 'சித்தி',       transliteration: 'Chitti',     english: "Mother's Sister" }, // fallback
+  mothersBrother:       { script: 'மாமா',         transliteration: 'Māmā',        english: "Mother's Brother" },
+  mothersOlderSister:   { script: 'அத்தை',       transliteration: 'Attai',       english: "Mother's Older Sister" },
+  mothersYoungerSister: { script: 'சித்தி',       transliteration: 'Chitti',      english: "Mother's Younger Sister" },
+  mothersSister:        { script: 'சித்தி',       transliteration: 'Chitti',      english: "Mother's Sister" },
 
-  // Spouse
-  husband:              { script: 'கணவன்',        transliteration: 'Kaṇavan',    english: 'Husband' },
-  wife:                 { script: 'மனைவி',        transliteration: 'Maṉaivi',    english: 'Wife' },
-  spouse:               { script: 'துணைவர்',      transliteration: 'Tuṇaivar',   english: 'Spouse' }, // fallback
+  husband:              { script: 'கணவன்',        transliteration: 'Kaṇavan',     english: 'Husband' },
+  wife:                 { script: 'மனைவி',        transliteration: 'Maṉaivi',     english: 'Wife' },
+  spouse:               { script: 'துணைவர்',      transliteration: 'Tuṇaivar',    english: 'Spouse' },
 
-  // Children
-  son:                  { script: 'மகன்',         transliteration: 'Makaṉ',      english: 'Son' },
-  daughter:             { script: 'மகள்',          transliteration: 'Makaḷ',      english: 'Daughter' },
-  child:                { script: 'குழந்தை',       transliteration: 'Kuḻantai',   english: 'Child' }, // fallback
+  son:                  { script: 'மகன்',         transliteration: 'Makaṉ',       english: 'Son' },
+  daughter:             { script: 'மகள்',          transliteration: 'Makaḷ',       english: 'Daughter' },
+  child:                { script: 'குழந்தை',       transliteration: 'Kuḻantai',    english: 'Child' },
 
-  // Grandchildren
-  grandson:             { script: 'பேரன்',         transliteration: 'Pēraṉ',      english: 'Grandson' },
-  granddaughter:        { script: 'பேத்தி',        transliteration: 'Pētti',      english: 'Granddaughter' },
+  grandson:             { script: 'பேரன்',         transliteration: 'Pēraṉ',       english: 'Grandson' },
+  granddaughter:        { script: 'பேத்தி',        transliteration: 'Pētti',       english: 'Granddaughter' },
+  grandchild:           { script: 'பேர்க்குழந்தை', transliteration: 'Pērkkuḻantai', english: 'Grandchild' },
 
-  // In-laws
-  fatherInLaw:          { script: 'மாமனார்',       transliteration: 'Māmaṉār',    english: 'Father-in-law' },
-  motherInLaw:          { script: 'மாமியார்',      transliteration: 'Māmiyār',    english: 'Mother-in-law' },
+  fatherInLaw:          { script: 'மாமனார்',       transliteration: 'Māmaṉār',     english: 'Father-in-law' },
+  motherInLaw:          { script: 'மாமியார்',      transliteration: 'Māmiyār',     english: 'Mother-in-law' },
+
+  sonInLaw:             { script: 'மாப்பிள்ளை',   transliteration: 'Māppiḷḷai',  english: 'Son-in-law' },
+  daughterInLaw:        { script: 'மருமகள்',       transliteration: 'Marumakaḷ',  english: 'Daughter-in-law' },
+
+  relative:             { script: 'உறவினர்',       transliteration: 'Uṟaviṉar',   english: 'Relative' },
 };
 
 // ---------------------------------------------------------------------------
-// English-only title definitions (just English labels, no script/transliteration)
+// English-only title definitions
 // ---------------------------------------------------------------------------
 const ENGLISH_TITLES = {
   father:               { english: 'Father' },
@@ -99,48 +97,41 @@ const ENGLISH_TITLES = {
   child:                { english: 'Child' },
   grandson:             { english: 'Grandson' },
   granddaughter:        { english: 'Granddaughter' },
+  grandchild:           { english: 'Grandchild' },
   fatherInLaw:          { english: 'Father-in-law' },
   motherInLaw:          { english: 'Mother-in-law' },
+  sonInLaw:             { english: 'Son-in-law' },
+  daughterInLaw:        { english: 'Daughter-in-law' },
+  relative:             { english: 'Relative' },
 };
 
-// Registry of all supported cultures.
-// To add a new culture, add its title map here using the same keys.
 const CULTURE_TITLES = {
-  TAMIL: TAMIL_TITLES,
+  TAMIL:   TAMIL_TITLES,
   ENGLISH: ENGLISH_TITLES,
 };
 
 // ---------------------------------------------------------------------------
-// Graph builder — converts flat DB arrays into adjacency structure
+// Graph builder — SIBLING edges are ignored (siblings derived from shared parents)
 // ---------------------------------------------------------------------------
 function buildGraph(people, relationships) {
   const graph = {};
 
   for (const person of people) {
-    graph[person.id] = {
-      person,
-      parents: [],   // parent person IDs
-      children: [],  // child person IDs
-      spouses: [],   // spouse person IDs
-      siblings: [],  // sibling person IDs
-    };
+    graph[person.id] = { person, parents: [], children: [], spouses: [] };
   }
 
   for (const rel of relationships) {
     const { fromPersonId, toPersonId, type } = rel;
     const from = graph[fromPersonId];
-    const to = graph[toPersonId];
-
+    const to   = graph[toPersonId];
     if (!from || !to) continue;
 
     switch (type) {
       case 'PARENT':
-        // fromPerson IS A PARENT OF toPerson
         from.children.push(toPersonId);
         to.parents.push(fromPersonId);
         break;
       case 'CHILD':
-        // fromPerson IS A CHILD OF toPerson
         from.parents.push(toPersonId);
         to.children.push(fromPersonId);
         break;
@@ -148,10 +139,7 @@ function buildGraph(people, relationships) {
         from.spouses.push(toPersonId);
         to.spouses.push(fromPersonId);
         break;
-      case 'SIBLING':
-        from.siblings.push(toPersonId);
-        to.siblings.push(fromPersonId);
-        break;
+      // SIBLING edges deliberately ignored — derived from shared parents
     }
   }
 
@@ -159,95 +147,155 @@ function buildGraph(people, relationships) {
 }
 
 // ---------------------------------------------------------------------------
-// Kinship key calculator
-// Returns a key like "father", "olderSister", "paternalGrandfather" etc.
-// Returns null if relationship is too distant or unrecognised.
-// Returns "self" for the perspective person themselves.
+// BFS kinship computation — derives titles for all reachable people
 // ---------------------------------------------------------------------------
-function getKinshipKey(graph, perspectiveId, targetId) {
-  if (perspectiveId === targetId) return 'self';
+function computeKinshipBFS(graph, perspectiveId) {
+  const result  = {};
+  const assigned = new Set();
 
-  const pNode = graph[perspectiveId];
-  const tNode = graph[targetId];
-  if (!pNode || !tNode) return null;
+  const perspNode = graph[perspectiveId];
+  if (!perspNode) return result;
 
-  const pPerson = pNode.person;
-  const tPerson = tNode.person;
+  const perspPerson = perspNode.person;
+  assigned.add(perspectiveId);
+  result[perspectiveId] = 'self';
 
-  // ── DIRECT PARENT ──────────────────────────────────────────────────────────
-  if (pNode.parents.includes(targetId)) {
-    return tPerson.gender === 'MALE' ? 'father' : 'mother';
+  // ── PASS 1: Immediate family ───────────────────────────────────────────────
+
+  for (const parentId of perspNode.parents) {
+    if (assigned.has(parentId)) continue;
+    assigned.add(parentId);
+    const p = graph[parentId]?.person;
+    result[parentId] = p?.gender === 'MALE' ? 'father' : 'mother';
   }
 
-  // ── DIRECT CHILD ───────────────────────────────────────────────────────────
-  if (pNode.children.includes(targetId)) {
-    if (tPerson.gender === 'MALE') return 'son';
-    if (tPerson.gender === 'FEMALE') return 'daughter';
-    return 'child';
+  for (const childId of perspNode.children) {
+    if (assigned.has(childId)) continue;
+    assigned.add(childId);
+    const p = graph[childId]?.person;
+    result[childId] = p?.gender === 'MALE' ? 'son'
+                    : p?.gender === 'FEMALE' ? 'daughter' : 'child';
   }
 
-  // ── SPOUSE ─────────────────────────────────────────────────────────────────
-  if (pNode.spouses.includes(targetId)) {
-    if (tPerson.gender === 'MALE') return 'husband';
-    if (tPerson.gender === 'FEMALE') return 'wife';
-    return 'spouse';
+  for (const spouseId of perspNode.spouses) {
+    if (assigned.has(spouseId)) continue;
+    assigned.add(spouseId);
+    const p = graph[spouseId]?.person;
+    result[spouseId] = p?.gender === 'MALE' ? 'husband'
+                     : p?.gender === 'FEMALE' ? 'wife' : 'spouse';
   }
 
-  // ── SIBLING ────────────────────────────────────────────────────────────────
-  if (pNode.siblings.includes(targetId)) {
-    return siblingKey(pPerson, tPerson);
+  // Siblings: derived from shared parents (no SIBLING edge needed)
+  for (const parentId of perspNode.parents) {
+    const parentNode = graph[parentId];
+    if (!parentNode) continue;
+    for (const sibId of parentNode.children) {
+      if (sibId === perspectiveId || assigned.has(sibId)) continue;
+      assigned.add(sibId);
+      result[sibId] = siblingKey(perspPerson, graph[sibId]?.person);
+    }
   }
 
-  // ── TWO-HOP RELATIONSHIPS (via parents) ────────────────────────────────────
-  for (const parentId of pNode.parents) {
+  // ── PASS 2: Two-hop relatives ──────────────────────────────────────────────
+
+  // Grandparents (via each parent)
+  for (const parentId of perspNode.parents) {
     const parentNode = graph[parentId];
     if (!parentNode) continue;
     const parentPerson = parentNode.person;
-
-    // Grandparent (parent's parent)
-    if (parentNode.parents.includes(targetId)) {
-      return grandparentKey(parentPerson, tPerson);
-    }
-
-    // Uncle / Aunt (parent's sibling)
-    if (parentNode.siblings.includes(targetId)) {
-      return parentSiblingKey(parentPerson, tPerson);
+    for (const gpId of parentNode.parents) {
+      if (assigned.has(gpId)) continue;
+      assigned.add(gpId);
+      result[gpId] = grandparentKey(parentPerson, graph[gpId]?.person);
     }
   }
 
-  // ── IN-LAWS (spouse's parent) ──────────────────────────────────────────────
-  for (const spouseId of pNode.spouses) {
+  // In-laws (via each spouse's parents)
+  for (const spouseId of perspNode.spouses) {
     const spouseNode = graph[spouseId];
     if (!spouseNode) continue;
-
-    if (spouseNode.parents.includes(targetId)) {
-      return tPerson.gender === 'MALE' ? 'fatherInLaw' : 'motherInLaw';
+    for (const ilId of spouseNode.parents) {
+      if (assigned.has(ilId)) continue;
+      assigned.add(ilId);
+      const p = graph[ilId]?.person;
+      result[ilId] = p?.gender === 'MALE' ? 'fatherInLaw' : 'motherInLaw';
     }
   }
 
-  // ── GRANDCHILDREN (child's child) ──────────────────────────────────────────
-  for (const childId of pNode.children) {
+  // Grandchildren (via each child's children)
+  for (const childId of perspNode.children) {
     const childNode = graph[childId];
     if (!childNode) continue;
-
-    if (childNode.children.includes(targetId)) {
-      if (tPerson.gender === 'MALE') return 'grandson';
-      if (tPerson.gender === 'FEMALE') return 'granddaughter';
-      return 'grandchild';
+    for (const gcId of childNode.children) {
+      if (assigned.has(gcId)) continue;
+      assigned.add(gcId);
+      const p = graph[gcId]?.person;
+      result[gcId] = p?.gender === 'MALE' ? 'grandson'
+                   : p?.gender === 'FEMALE' ? 'granddaughter' : 'grandchild';
     }
   }
 
-  return null; // relationship too distant or not modelled yet
+  // Children's spouses (son/daughter-in-law)
+  for (const childId of perspNode.children) {
+    const childNode = graph[childId];
+    if (!childNode) continue;
+    for (const csId of childNode.spouses) {
+      if (assigned.has(csId)) continue;
+      assigned.add(csId);
+      const p = graph[csId]?.person;
+      result[csId] = p?.gender === 'MALE' ? 'sonInLaw'
+                   : p?.gender === 'FEMALE' ? 'daughterInLaw' : 'relative';
+    }
+  }
+
+  // ── PASS 3: Three-hop relatives ────────────────────────────────────────────
+
+  // Uncles / Aunts: perspective's parent → grandparent → grandparent's other children
+  for (const parentId of perspNode.parents) {
+    const parentNode = graph[parentId];
+    if (!parentNode) continue;
+    const parentPerson = parentNode.person;
+    for (const gpId of parentNode.parents) {
+      const gpNode = graph[gpId];
+      if (!gpNode) continue;
+      for (const uncleAuntId of gpNode.children) {
+        if (uncleAuntId === parentId || assigned.has(uncleAuntId)) continue;
+        assigned.add(uncleAuntId);
+        const key = parentSiblingKey(parentPerson, graph[uncleAuntId]?.person);
+        if (key) result[uncleAuntId] = key;
+      }
+    }
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Full reachability BFS — used for 'relative' fallback
+// ---------------------------------------------------------------------------
+function findReachable(graph, startId) {
+  const reachable = new Set();
+  const queue = [startId];
+  while (queue.length > 0) {
+    const id = queue.shift();
+    if (reachable.has(id)) continue;
+    reachable.add(id);
+    const node = graph[id];
+    if (!node) continue;
+    for (const nId of [...node.parents, ...node.children, ...node.spouses]) {
+      if (!reachable.has(nId)) queue.push(nId);
+    }
+  }
+  return reachable;
 }
 
 // ---------------------------------------------------------------------------
 // Helper: sibling key with older/younger distinction via DOB
 // ---------------------------------------------------------------------------
 function siblingKey(perspective, target) {
-  const pDob = perspective.dob ? new Date(perspective.dob) : null;
-  const tDob = target.dob ? new Date(target.dob) : null;
-
-  // target is "older" if their date of birth is earlier than perspective's
+  if (!target) return 'relative';
+  const pDob = perspective?.dob ? new Date(perspective.dob) : null;
+  const tDob = target.dob      ? new Date(target.dob)      : null;
   const isOlder = pDob && tDob ? tDob < pDob : null;
 
   if (target.gender === 'MALE') {
@@ -258,32 +306,33 @@ function siblingKey(perspective, target) {
     if (isOlder === null) return 'sister';
     return isOlder ? 'olderSister' : 'youngerSister';
   }
-  return 'sibling';
+  return 'relative';
 }
 
 // ---------------------------------------------------------------------------
 // Helper: grandparent key (paternal vs maternal based on parent's gender)
 // ---------------------------------------------------------------------------
 function grandparentKey(parent, grandparent) {
-  const isPaternalLine = parent.gender === 'MALE';
+  if (!grandparent) return 'relative';
+  const isPaternalLine = parent?.gender === 'MALE';
   if (grandparent.gender === 'MALE') {
     return isPaternalLine ? 'paternalGrandfather' : 'maternalGrandfather';
   }
   if (grandparent.gender === 'FEMALE') {
     return isPaternalLine ? 'paternalGrandmother' : 'maternalGrandmother';
   }
-  return 'grandparent';
+  return isPaternalLine ? 'grandfather' : 'grandmother';
 }
 
 // ---------------------------------------------------------------------------
 // Helper: uncle/aunt key based on which parent's side and relative age
 // ---------------------------------------------------------------------------
 function parentSiblingKey(parent, sibling) {
-  if (parent.gender === 'MALE') {
-    // Father's side
+  if (!sibling) return null;
+
+  if (parent?.gender === 'MALE') {
     if (sibling.gender === 'MALE') {
-      // Is sibling older or younger than the father?
-      const fDob = parent.dob ? new Date(parent.dob) : null;
+      const fDob = parent.dob  ? new Date(parent.dob)  : null;
       const sDob = sibling.dob ? new Date(sibling.dob) : null;
       const isOlderThanFather = fDob && sDob ? sDob < fDob : null;
       if (isOlderThanFather === null) return 'fathersBrother';
@@ -292,11 +341,10 @@ function parentSiblingKey(parent, sibling) {
     return 'fathersSister';
   }
 
-  if (parent.gender === 'FEMALE') {
-    // Mother's side
+  if (parent?.gender === 'FEMALE') {
     if (sibling.gender === 'MALE') return 'mothersBrother';
     if (sibling.gender === 'FEMALE') {
-      const mDob = parent.dob ? new Date(parent.dob) : null;
+      const mDob = parent.dob  ? new Date(parent.dob)  : null;
       const sDob = sibling.dob ? new Date(sibling.dob) : null;
       const isOlderThanMother = mDob && sDob ? sDob < mDob : null;
       if (isOlderThanMother === null) return 'mothersSister';
@@ -313,7 +361,6 @@ function parentSiblingKey(parent, sibling) {
 function computeKinship(people, relationships, perspectiveId, culture, titleOverrides = []) {
   const graph = buildGraph(people, relationships);
 
-  // Build override map: { [relationshipKey]: { script, transliteration, english } }
   const overrideMap = {};
   for (const ov of titleOverrides) {
     if (ov.culture === culture) {
@@ -325,17 +372,30 @@ function computeKinship(people, relationships, perspectiveId, culture, titleOver
     }
   }
 
-  const titleMap = CULTURE_TITLES[culture] || ENGLISH_TITLES;
-  const result = {};
+  const titleMap    = CULTURE_TITLES[culture] || ENGLISH_TITLES;
+  const kinshipMap  = computeKinshipBFS(graph, perspectiveId);
+  const reachable   = findReachable(graph, perspectiveId);
+  const result      = {};
 
   for (const person of people) {
-    const key = getKinshipKey(graph, perspectiveId, person.id);
-    if (!key || key === 'self') {
-      result[person.id] = { kinshipKey: key || null, title: null };
+    if (person.id === perspectiveId) {
+      result[person.id] = { kinshipKey: 'self', title: null };
       continue;
     }
 
-    // User overrides take priority
+    const key = kinshipMap[person.id];
+
+    if (!key) {
+      // Reachable but path not modelled → 'relative' fallback
+      if (reachable.has(person.id)) {
+        const title = overrideMap['relative'] || titleMap['relative'] || null;
+        result[person.id] = { kinshipKey: 'relative', title };
+      } else {
+        result[person.id] = { kinshipKey: null, title: null };
+      }
+      continue;
+    }
+
     const title = overrideMap[key] || titleMap[key] || null;
     result[person.id] = { kinshipKey: key, title };
   }
@@ -343,4 +403,4 @@ function computeKinship(people, relationships, perspectiveId, culture, titleOver
   return result;
 }
 
-module.exports = { computeKinship, getKinshipKey, buildGraph, CULTURE_TITLES };
+module.exports = { computeKinship, buildGraph, CULTURE_TITLES };

@@ -16,11 +16,6 @@ const TYPES = [
     label: 'Spouse',
     desc: 'The two people are spouses (bidirectional)',
   },
-  {
-    value: 'SIBLING',
-    label: 'Sibling',
-    desc: 'The two people are siblings (bidirectional)',
-  },
 ];
 
 /**

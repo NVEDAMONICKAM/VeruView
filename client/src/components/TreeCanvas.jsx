@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -18,21 +18,18 @@ const NODE_HEIGHT = 220;
 const nodeTypes = { person: PersonNode };
 
 // ---------------------------------------------------------------------------
-// Edge style definitions — edit EDGE_CONFIG to change colours/labels.
-// To add a new culture's edge type, add a key here.
+// Edge style definitions — SIBLING removed (derived from shared parents)
 // ---------------------------------------------------------------------------
 const EDGE_CONFIG = {
-  PARENT:  { color: '#6BAF8C', label: 'Parent',  bg: 'rgba(107,175,140,0.15)' },
-  CHILD:   { color: '#6BAF8C', label: 'Parent',  bg: 'rgba(107,175,140,0.15)' },
-  SPOUSE:  { color: '#5BA8A0', label: 'Spouse',  bg: 'rgba(91,168,160,0.15)'  },
-  SIBLING: { color: '#A0A0A0', label: 'Sibling', bg: 'rgba(160,160,160,0.15)' },
+  PARENT: { color: '#6BAF8C', label: 'Parent',  bg: 'rgba(107,175,140,0.15)' },
+  CHILD:  { color: '#6BAF8C', label: 'Parent',  bg: 'rgba(107,175,140,0.15)' },
+  SPOUSE: { color: '#5BA8A0', label: 'Spouse',  bg: 'rgba(91,168,160,0.15)'  },
 };
 
 // ---------------------------------------------------------------------------
-// Dagre auto-layout (hierarchical top-down)
-// Only PARENT/CHILD edges drive the rank layout; others are cosmetic.
+// Dagre auto-layout. Stored positions (externalPositions) take priority.
 // ---------------------------------------------------------------------------
-function computeLayout(rfNodes, rfEdges) {
+function computeLayout(rfNodes, rfEdges, externalPositions = {}) {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100, marginx: 40, marginy: 40 });
@@ -45,6 +42,9 @@ function computeLayout(rfNodes, rfEdges) {
   dagre.layout(g);
 
   return rfNodes.map((n) => {
+    if (externalPositions[n.id]) {
+      return { ...n, position: externalPositions[n.id] };
+    }
     const pos = g.node(n.id);
     return {
       ...n,
@@ -56,9 +56,7 @@ function computeLayout(rfNodes, rfEdges) {
 }
 
 // ---------------------------------------------------------------------------
-// Build nodes + edges from DB data.
-// Labels are NOT set here — they are applied reactively in a separate effect
-// keyed on activeEdgeId, so hover/tap updates don't trigger a full dagre relayout.
+// Build nodes + edges — SIBLING edges filtered out
 // ---------------------------------------------------------------------------
 function buildFlowElements(people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers) {
   const nodes = people.map((person, i) => ({
@@ -72,14 +70,17 @@ function buildFlowElements(people, relationships, kinship, perspectiveId, cultur
       isPerspective: person.id === perspectiveId,
       isReadOnly,
       onClickNode: handlers.onClickNode,
-      onEditNode: handlers.onEditNode,
+      onEditNode:  handlers.onEditNode,
     },
   }));
 
-  const seen = new Set();
+  const seen  = new Set();
   const edges = [];
 
   for (const rel of relationships) {
+    // Skip sibling edges entirely
+    if (rel.type === 'SIBLING') continue;
+
     const pairKey = [rel.fromPersonId, rel.toPersonId].sort().join(':') + ':' + rel.type;
     if (seen.has(pairKey)) continue;
     seen.add(pairKey);
@@ -100,7 +101,6 @@ function buildFlowElements(people, relationships, kinship, perspectiveId, cultur
       animated: false,
       data: { type: rel.type, relId: rel.id },
       style: { stroke: color, strokeWidth: 2 },
-      // Labels start hidden — activeEdgeId effect applies them on hover/tap
       label: undefined,
       markerEnd: isHierarchical
         ? { type: MarkerType.ArrowClosed, color, width: 12, height: 12 }
@@ -112,7 +112,7 @@ function buildFlowElements(people, relationships, kinship, perspectiveId, cultur
 }
 
 // ---------------------------------------------------------------------------
-// Legend component — full on desktop, collapsible tooltip icon on mobile
+// Legend — Sibling entry removed
 // ---------------------------------------------------------------------------
 function EdgeLegend() {
   const [open, setOpen] = useState(false);
@@ -120,7 +120,6 @@ function EdgeLegend() {
   const entries = [
     { color: '#6BAF8C', label: 'Parent / Child' },
     { color: '#5BA8A0', label: 'Spouse / Partner' },
-    { color: '#A0A0A0', label: 'Sibling' },
   ];
 
   const legendContent = (
@@ -141,12 +140,9 @@ function EdgeLegend() {
 
   return (
     <>
-      {/* Desktop: always-visible card */}
       <div className="hidden sm:block bg-earth-warmWhite border border-veru-mid rounded-xl shadow-sm px-3 py-2.5">
         {legendContent}
       </div>
-
-      {/* Mobile: collapsible icon button */}
       <div className="sm:hidden relative">
         <button
           onClick={() => setOpen((v) => !v)}
@@ -166,6 +162,51 @@ function EdgeLegend() {
 }
 
 // ---------------------------------------------------------------------------
+// Undo / Redo toolbar buttons
+// ---------------------------------------------------------------------------
+function UndoRedoButtons({ onUndo, onRedo, canUndo, canRedo }) {
+  const btnBase =
+    'w-11 h-11 rounded-full flex items-center justify-center border transition-colors shadow-sm';
+  const btnActive =
+    'bg-earth-warmWhite border-veru-mid text-veru-dark hover:bg-veru-light hover:border-veru-accent';
+  const btnDisabled =
+    'bg-gray-100 border-gray-200 text-gray-300 cursor-not-allowed';
+
+  return (
+    <div className="flex gap-2">
+      <button
+        onClick={onUndo}
+        disabled={!canUndo}
+        title="Undo (Ctrl+Z)"
+        aria-label="Undo"
+        className={`${btnBase} ${canUndo ? btnActive : btnDisabled}`}
+      >
+        {/* Counter-clockwise arrow */}
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 7v6h6" />
+          <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+        </svg>
+      </button>
+      <button
+        onClick={onRedo}
+        disabled={!canRedo}
+        title="Redo (Ctrl+Y)"
+        aria-label="Redo"
+        className={`${btnBase} ${canRedo ? btnActive : btnDisabled}`}
+      >
+        {/* Clockwise arrow */}
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 7v6h-6" />
+          <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main TreeCanvas component
 // ---------------------------------------------------------------------------
 export default function TreeCanvas({
@@ -178,12 +219,23 @@ export default function TreeCanvas({
   onPerspectiveChange,
   onEditPerson,
   onEdgeClick,
+  // Undo / redo
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
+  // Node position persistence
+  externalPositions = {},
+  onPositionsChange,
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [activeEdgeId, setActiveEdgeId]  = useState(null);
 
-  // Track which edge is currently "active" (hovered on desktop, tapped on mobile)
-  const [activeEdgeId, setActiveEdgeId] = useState(null);
+  // Keep a ref so the layout effect can always read the latest positions
+  // without needing them in its dependency array (avoids re-running on drag).
+  const externalPositionsRef = useRef(externalPositions);
+  externalPositionsRef.current = externalPositions;
 
   const handlers = useMemo(
     () => ({
@@ -193,28 +245,36 @@ export default function TreeCanvas({
     [onPerspectiveChange, onEditPerson]
   );
 
-  // Full rebuild — only on data or layout changes (not on hover)
+  // Full rebuild on data changes (uses latest external positions via ref)
   useEffect(() => {
     const { nodes: rawNodes, edges: rawEdges } = buildFlowElements(
       people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers
     );
-    const laidOut = computeLayout(rawNodes, rawEdges);
+    const laidOut = computeLayout(rawNodes, rawEdges, externalPositionsRef.current);
     setNodes(laidOut);
     setEdges(rawEdges);
   }, [people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers]);
 
-  // Label patch — runs only when activeEdgeId changes.
-  // Patching edges in-place avoids a full dagre relayout on every hover.
+  // Apply restored positions (undo/redo) without full dagre re-run
+  useEffect(() => {
+    if (Object.keys(externalPositions).length === 0) return;
+    setNodes((prev) =>
+      prev.map((n) =>
+        externalPositions[n.id] ? { ...n, position: externalPositions[n.id] } : n
+      )
+    );
+  }, [externalPositions]);
+
+  // Label patch on hover/tap — runs only when activeEdgeId changes
   useEffect(() => {
     setEdges((prev) =>
       prev.map((e) => {
-        const cfg = EDGE_CONFIG[e.data?.type];
+        const cfg      = EDGE_CONFIG[e.data?.type];
         const isActive = e.id === activeEdgeId;
         return {
           ...e,
-          label:              isActive ? cfg?.label : undefined,
+          label:               isActive ? cfg?.label : undefined,
           labelStyle:          isActive ? { fill: cfg?.color, fontSize: 11, fontFamily: 'Inter, sans-serif', fontWeight: 600 } : undefined,
-          // Solid white background + coloured border so the label sits clearly above the line
           labelBgStyle:        isActive ? { fill: '#ffffff', stroke: cfg?.color, strokeWidth: 1.5 } : undefined,
           labelBgPadding:      isActive ? [8, 4] : undefined,
           labelBgBorderRadius: isActive ? 12 : undefined,
@@ -223,29 +283,29 @@ export default function TreeCanvas({
     );
   }, [activeEdgeId]);
 
-  // Desktop: show label on mouse enter
-  const handleEdgeMouseEnter = useCallback((_evt, edge) => {
-    setActiveEdgeId(edge.id);
-  }, []);
+  const handleEdgeMouseEnter = useCallback((_evt, edge) => setActiveEdgeId(edge.id), []);
+  const handleEdgeMouseLeave = useCallback(() => setActiveEdgeId(null), []);
 
-  // Desktop: hide label on mouse leave
-  const handleEdgeMouseLeave = useCallback(() => {
-    setActiveEdgeId(null);
-  }, []);
-
-  // All devices: click/tap toggles label; if already active (desktop hover), open edit modal
   const handleEdgeClick = useCallback(
     (_evt, edge) => {
       if (activeEdgeId === edge.id) {
-        // Second interaction → open edit modal (desktop) or dismiss label (mobile)
         setActiveEdgeId(null);
         if (!isReadOnly) onEdgeClick?.(edge.data);
       } else {
-        // First interaction → show label badge
         setActiveEdgeId(edge.id);
       }
     },
     [activeEdgeId, isReadOnly, onEdgeClick]
+  );
+
+  // Capture node positions after drag so TreeView can include them in snapshots
+  const handleNodeDragStop = useCallback(
+    (_evt, _node, allNodes) => {
+      const posMap = {};
+      allNodes.forEach((n) => { posMap[n.id] = n.position; });
+      onPositionsChange?.(posMap);
+    },
+    [onPositionsChange]
   );
 
   return (
@@ -258,12 +318,12 @@ export default function TreeCanvas({
         onEdgeMouseEnter={handleEdgeMouseEnter}
         onEdgeMouseLeave={handleEdgeMouseLeave}
         onEdgeClick={handleEdgeClick}
+        onNodeDragStop={handleNodeDragStop}
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         minZoom={0.2}
         maxZoom={2}
-        // Touch: React Flow handles pinch-to-zoom and pan natively
         panOnScroll={false}
         zoomOnScroll={true}
         panOnDrag={true}
@@ -272,9 +332,23 @@ export default function TreeCanvas({
       >
         <Background color="#A8D5B5" gap={24} size={1} />
         <Controls />
+
+        {/* Undo / Redo buttons — top-right */}
+        {!isReadOnly && (
+          <Panel position="top-right">
+            <UndoRedoButtons
+              onUndo={onUndo}
+              onRedo={onRedo}
+              canUndo={canUndo}
+              canRedo={canRedo}
+            />
+          </Panel>
+        )}
+
         <Panel position="bottom-left">
           <EdgeLegend />
         </Panel>
+
         <MiniMap
           nodeColor={(n) => n.data?.isPerspective ? '#6BAF8C' : '#D4EDDA'}
           maskColor="rgba(212, 237, 218, 0.6)"

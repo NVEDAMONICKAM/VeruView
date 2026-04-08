@@ -1,45 +1,50 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
-  getTree, createPerson, updatePerson, deletePerson,
-  createRelationship, deleteRelationship, getKinship,
+  getTree, getKinship,
+  createPerson, updatePerson, deletePerson,
+  createRelationship, deleteRelationship,
 } from '../api/client';
 import TopBar from '../components/TopBar';
 import TreeCanvas from '../components/TreeCanvas';
 import PersonModal from '../components/PersonModal';
 import RelationshipModal from '../components/RelationshipModal';
+import { useHistory } from '../hooks/useHistory';
 
 export default function TreeView() {
-  const { id }    = useParams();
-  const navigate  = useNavigate();
+  const { id }   = useParams();
+  const navigate = useNavigate();
 
   const [tree,          setTree]          = useState(null);
   const [people,        setPeople]        = useState([]);
   const [relationships, setRelationships] = useState([]);
   const [kinship,       setKinship]       = useState({});
   const [perspectiveId, setPerspectiveId] = useState(null);
+  const [nodePositions, setNodePositions] = useState({});
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState('');
+  const [drawerOpen,    setDrawerOpen]    = useState(false);
+  const [personModal,   setPersonModal]   = useState(null);
+  const [relModal,      setRelModal]      = useState(null);
 
-  // Mobile sidebar drawer
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const { pushHistory, resetHistory, undo, redo, canUndo, canRedo } = useHistory();
 
-  // Modal state
-  const [personModal, setPersonModal] = useState(null);
-  const [relModal,    setRelModal]    = useState(null);
-
+  // ---------------------------------------------------------------------------
   // Load tree
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     setLoading(true);
     getTree(id)
       .then((res) => {
         const t = res.data;
         setTree(t);
-        const people = Array.isArray(t.people) ? t.people : [];
-        const rels = Array.isArray(t.relationships) ? t.relationships : [];
-        setPeople(people);
-        setRelationships(rels);
-        if (people.length > 0 && !perspectiveId) setPerspectiveId(people[0].id);
+        const loadedPeople = Array.isArray(t.people)        ? t.people        : [];
+        const loadedRels   = Array.isArray(t.relationships) ? t.relationships : [];
+        setPeople(loadedPeople);
+        setRelationships(loadedRels);
+        if (loadedPeople.length > 0) setPerspectiveId(loadedPeople[0].id);
+        // Seed history with the initial loaded state (not undoable)
+        resetHistory({ people: loadedPeople, relationships: loadedRels, nodePositions: {} });
       })
       .catch((err) => {
         if (err.response?.status === 404) navigate('/');
@@ -48,7 +53,9 @@ export default function TreeView() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  // Load kinship titles
+  // ---------------------------------------------------------------------------
+  // Refresh kinship titles whenever perspective, culture, or data changes
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!perspectiveId || !tree) return;
     getKinship(id, perspectiveId)
@@ -56,43 +63,102 @@ export default function TreeView() {
       .catch(() => {});
   }, [perspectiveId, tree?.culture, people.length, relationships.length]);
 
+  // ---------------------------------------------------------------------------
+  // Undo / Redo handlers
+  // ---------------------------------------------------------------------------
+  function handleUndo() {
+    const snap = undo();
+    if (!snap) return;
+    setPeople(snap.people);
+    setRelationships(snap.relationships);
+    setNodePositions(snap.nodePositions || {});
+    if (perspectiveId) {
+      getKinship(id, perspectiveId).then((r) => setKinship(r.data)).catch(() => {});
+    }
+  }
+
+  function handleRedo() {
+    const snap = redo();
+    if (!snap) return;
+    setPeople(snap.people);
+    setRelationships(snap.relationships);
+    setNodePositions(snap.nodePositions || {});
+    if (perspectiveId) {
+      getKinship(id, perspectiveId).then((r) => setKinship(r.data)).catch(() => {});
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Keyboard shortcuts — Ctrl+Z / Cmd+Z  and  Ctrl+Y / Cmd+Shift+Z
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    function onKey(e) {
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ctrl && !e.shiftKey && e.key === 'z') { e.preventDefault(); handleUndo(); }
+      if (ctrl && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); handleRedo(); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canUndo, canRedo]); // re-bind so closures see latest canUndo/canRedo
+
+  // ---------------------------------------------------------------------------
+  // Node position tracking (called from TreeCanvas on drag stop)
+  // ---------------------------------------------------------------------------
+  const handlePositionsChange = useCallback((posMap) => {
+    setNodePositions(posMap);
+  }, []);
+
+  // ---------------------------------------------------------------------------
   // Person CRUD
+  // ---------------------------------------------------------------------------
   async function handleSavePerson(fd) {
+    let newPeople;
     if (personModal?.person) {
       const res = await updatePerson(id, personModal.person.id, fd);
-      setPeople((prev) => prev.map((p) => (p.id === res.data.id ? res.data : p)));
+      newPeople = people.map((p) => (p.id === res.data.id ? res.data : p));
     } else {
       const res = await createPerson(id, fd);
-      setPeople((prev) => [...prev, res.data]);
+      newPeople = [...people, res.data];
       if (people.length === 0) setPerspectiveId(res.data.id);
     }
+    setPeople(newPeople);
+    pushHistory({ people: newPeople, relationships, nodePositions });
   }
 
   async function handleDeletePerson() {
     const personId = personModal?.person?.id;
     if (!personId) return;
     await deletePerson(id, personId);
-    setPeople((prev) => prev.filter((p) => p.id !== personId));
-    setRelationships((prev) =>
-      prev.filter((r) => r.fromPersonId !== personId && r.toPersonId !== personId)
+    const newPeople = people.filter((p) => p.id !== personId);
+    const newRels   = relationships.filter(
+      (r) => r.fromPersonId !== personId && r.toPersonId !== personId
     );
-    if (perspectiveId === personId) {
-      const remaining = people.filter((p) => p.id !== personId);
-      setPerspectiveId(remaining[0]?.id ?? null);
-    }
+    setPeople(newPeople);
+    setRelationships(newRels);
+    if (perspectiveId === personId) setPerspectiveId(newPeople[0]?.id ?? null);
+    pushHistory({ people: newPeople, relationships: newRels, nodePositions });
   }
 
+  // ---------------------------------------------------------------------------
   // Relationship CRUD
+  // ---------------------------------------------------------------------------
   async function handleSaveRelationship(data) {
-    const res = await createRelationship(id, data);
-    setRelationships((prev) => [...prev, res.data]);
+    const res  = await createRelationship(id, data);
+    const newRels = [...relationships, res.data];
+    setRelationships(newRels);
+    pushHistory({ people, relationships: newRels, nodePositions });
   }
 
   async function handleDeleteRelationship() {
     const relId = relModal?.relationship?.relId;
     if (!relId) return;
     await deleteRelationship(id, relId);
-    setRelationships((prev) => prev.filter((r) => r.id !== relId));
+    const newRels = relationships.filter((r) => r.id !== relId);
+    setRelationships(newRels);
+    pushHistory({ people, relationships: newRels, nodePositions });
   }
 
   const handleEdgeClick = useCallback((edgeData) => {
@@ -102,7 +168,9 @@ export default function TreeView() {
 
   const perspectivePerson = people.find((p) => p.id === perspectiveId);
 
-  // Shared sidebar content (used in both desktop aside and mobile drawer)
+  // ---------------------------------------------------------------------------
+  // Sidebar content (desktop + mobile drawer)
+  // ---------------------------------------------------------------------------
   function SidebarContent({ onClose }) {
     return (
       <>
@@ -153,6 +221,9 @@ export default function TreeView() {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-veru-light">
@@ -185,7 +256,6 @@ export default function TreeView() {
           <div className="sm:hidden fixed inset-0 z-40 flex">
             <div className="flex-1 bg-black/40" onClick={() => setDrawerOpen(false)} />
             <div className="w-64 bg-earth-warmWhite flex flex-col h-full shadow-xl border-l border-veru-mid">
-              {/* Drawer header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-veru-light">
                 <span className="text-sm font-semibold text-veru-dark">Tree Menu</span>
                 <button
@@ -229,17 +299,22 @@ export default function TreeView() {
               onPerspectiveChange={setPerspectiveId}
               onEditPerson={(person) => setPersonModal({ person })}
               onEdgeClick={handleEdgeClick}
+              externalPositions={nodePositions}
+              onPositionsChange={handlePositionsChange}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              canUndo={canUndo}
+              canRedo={canRedo}
             />
           )}
         </main>
 
-        {/* Mobile FAB — opens sidebar drawer */}
+        {/* Mobile FAB */}
         <button
           className="sm:hidden fixed bottom-6 right-6 z-30 w-14 h-14 bg-earth-terra hover:bg-earth-terraDark text-white rounded-full shadow-lg flex items-center justify-center transition-colors"
           onClick={() => setDrawerOpen(true)}
           aria-label="Open tree menu"
         >
-          {/* Person + plus icon */}
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="9" cy="7" r="3"/>
             <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
