@@ -22,6 +22,11 @@ const shareRoutes        = require('./routes/shares');
 
 const app = express();
 
+// Trust Vercel's reverse proxy so req.secure = true behind HTTPS termination.
+// Without this, express-session sees req.secure=false and refuses to set
+// Secure cookies, meaning no session cookie is ever sent to the browser.
+app.set('trust proxy', 1);
+
 // ---------------------------------------------------------------------------
 // CORS
 // ---------------------------------------------------------------------------
