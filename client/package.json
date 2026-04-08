@@ -1,11 +1,13 @@
 {
   "name": "veruview-client",
   "version": "1.0.0",
+  "type": "module",
   "description": "VeruView frontend — culturally-aware family tree builder",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest"
   },
   "dependencies": {
     "@reactflow/core": "^11.11.3",
@@ -23,6 +25,7 @@
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.1",
-    "vite": "^5.2.0"
+    "vite": "^5.2.0",
+    "vitest": "^1.6.1"
   }
 }

@@ -6,18 +6,23 @@ import InitialsAvatar from './InitialsAvatar';
  * PersonNode — React Flow custom node for a family member.
  *
  * data props:
- *   person       — { id, name, dob, gender, photoUrl }
- *   kinship      — { kinshipKey, title: { script, transliteration, english } } | null
- *   culture      — "ENGLISH" | "TAMIL"
- *   isPerspective — boolean (highlighted when this is the viewpoint person)
- *   isReadOnly   — boolean
- *   onClickNode  — (personId) => void — switches perspective
- *   onEditNode   — (person) => void — opens edit modal
+ *   person        — { id, name, dob, gender, photoUrl }
+ *   kinship       — { kinshipKey, title: { script, transliteration, english } } | null
+ *   culture       — "ENGLISH" | "TAMIL"
+ *   isPerspective — boolean
+ *   isReadOnly    — boolean
+ *   onClickNode   — (personId) => void
+ *   onEditNode    — (person) => void
+ *   onAddSpouse   — (personId) => void  (contextual + button on right)
+ *   onAddChild    — (personId) => void  (contextual + button on bottom)
  */
 function PersonNode({ data, selected }) {
-  const { person, kinship, culture, isPerspective, isReadOnly, onClickNode, onEditNode } = data;
+  const {
+    person, kinship, culture, isPerspective, isReadOnly,
+    onClickNode, onEditNode, onAddSpouse, onAddChild,
+  } = data;
 
-  const title = kinship?.title ?? null;
+  const title    = kinship?.title ?? null;
   const showTamil = culture === 'TAMIL' && title?.script;
 
   return (
@@ -35,22 +40,22 @@ function PersonNode({ data, selected }) {
       `}
       onClick={() => onClickNode?.(person.id)}
       onDoubleClick={() => !isReadOnly && onEditNode?.(person)}
-      title={isReadOnly ? person.name : `Click to set perspective · Double-click to edit`}
+      title={isReadOnly ? person.name : 'Click to set perspective · Double-click to edit'}
     >
-      {/* React Flow handles — invisible connection points */}
+      {/* React Flow connection handles */}
       <Handle type="target" position={Position.Top}    className="!bg-veru-mid !w-2 !h-2 !border-0" />
-      <Handle type="source" position={Position.Bottom} className="!bg-veru-mid !w-2 !h-2 !border-0" />
+      <Handle type="source" position={Position.Bottom} className="!bg-veru-mid !w-2 !h-2 !border-0" id="bottom" />
       <Handle type="target" position={Position.Left}   className="!bg-veru-mid !w-2 !h-2 !border-0" />
-      <Handle type="source" position={Position.Right}  className="!bg-veru-mid !w-2 !h-2 !border-0" />
+      <Handle type="source" position={Position.Right}  className="!bg-veru-mid !w-2 !h-2 !border-0" id="right" />
 
-      {/* Perspective indicator badge */}
+      {/* Perspective badge */}
       {isPerspective && (
         <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-veru-accent text-white text-[9px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap z-10">
           Viewing as
         </div>
       )}
 
-      {/* Edit button (visible on hover, desktop only) */}
+      {/* Edit button (hover, desktop only) */}
       {!isReadOnly && (
         <button
           className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity
@@ -60,6 +65,40 @@ function PersonNode({ data, selected }) {
           title="Edit person"
         >
           ✎
+        </button>
+      )}
+
+      {/* Contextual (+) — Add Spouse (right side) */}
+      {!isReadOnly && onAddSpouse && (
+        <button
+          className="
+            absolute top-1/2 -right-4 -translate-y-1/2
+            sm:opacity-0 sm:group-hover:opacity-100 opacity-100
+            transition-opacity w-7 h-7 rounded-full
+            bg-veru-accent hover:bg-veru-dark text-white text-base font-bold
+            flex items-center justify-center shadow z-20
+          "
+          onClick={(e) => { e.stopPropagation(); onAddSpouse(person.id); }}
+          title="Add spouse"
+        >
+          +
+        </button>
+      )}
+
+      {/* Contextual (+) — Add Child (bottom centre) */}
+      {!isReadOnly && onAddChild && (
+        <button
+          className="
+            absolute -bottom-4 left-1/2 -translate-x-1/2
+            sm:opacity-0 sm:group-hover:opacity-100 opacity-100
+            transition-opacity w-7 h-7 rounded-full
+            bg-earth-terra hover:bg-earth-terraDark text-white text-base font-bold
+            flex items-center justify-center shadow z-20
+          "
+          onClick={(e) => { e.stopPropagation(); onAddChild(person.id); }}
+          title="Add child"
+        >
+          +
         </button>
       )}
 
@@ -75,7 +114,6 @@ function PersonNode({ data, selected }) {
           ) : (
             <InitialsAvatar name={person.name} size={56} />
           )}
-          {/* Gender indicator dot */}
           <span
             className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white
               ${person.gender === 'MALE' ? 'bg-blue-300' :
@@ -99,22 +137,19 @@ function PersonNode({ data, selected }) {
           </p>
         )}
 
-        {/* Kinship title area */}
+        {/* Kinship title */}
         {title && (
           <div className="w-full border-t border-veru-light pt-1.5 mt-0.5 text-center">
             {showTamil ? (
               <>
-                {/* Line 1: Tamil script — large */}
                 <p className="text-base font-semibold text-veru-dark leading-tight">
                   {title.script}
                 </p>
-                {/* Line 2: Transliteration · English — small, muted */}
                 <p className="text-[10px] text-gray-400 leading-snug">
                   {title.transliteration} · {title.english}
                 </p>
               </>
             ) : (
-              /* English-only — just the label */
               <p className="text-xs font-medium text-veru-dark">
                 {title.english}
               </p>

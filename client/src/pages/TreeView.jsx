@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
-  getTree, getKinship,
+  getTree,
   createPerson, updatePerson, deletePerson,
   createRelationship, deleteRelationship,
 } from '../api/client';
@@ -10,6 +10,10 @@ import TreeCanvas from '../components/TreeCanvas';
 import PersonModal from '../components/PersonModal';
 import RelationshipModal from '../components/RelationshipModal';
 import { useHistory } from '../hooks/useHistory';
+import { computeAllKinshipTitles } from '../lib/kinship';
+
+const NODE_WIDTH  = 176;
+const NODE_HEIGHT = 220;
 
 export default function TreeView() {
   const { id }   = useParams();
@@ -18,7 +22,6 @@ export default function TreeView() {
   const [tree,          setTree]          = useState(null);
   const [people,        setPeople]        = useState([]);
   const [relationships, setRelationships] = useState([]);
-  const [kinship,       setKinship]       = useState({});
   const [perspectiveId, setPerspectiveId] = useState(null);
   const [nodePositions, setNodePositions] = useState({});
   const [loading,       setLoading]       = useState(true);
@@ -27,13 +30,26 @@ export default function TreeView() {
   const [personModal,   setPersonModal]   = useState(null);
   const [relModal,      setRelModal]      = useState(null);
 
+  // Contextual add state — set before opening PersonModal from a (+) button
+  // { sourcePersonId, relType: 'SPOUSE'|'PARENT', newNodePosition }
+  const [pendingRelSource, setPendingRelSource] = useState(null);
+
   const { pushHistory, resetHistory, undo, redo, canUndo, canRedo } = useHistory();
+
+  // ---------------------------------------------------------------------------
+  // Kinship — computed client-side, no API call
+  // ---------------------------------------------------------------------------
+  const kinship = useMemo(() => {
+    if (!perspectiveId || !tree) return {};
+    return computeAllKinshipTitles(perspectiveId, people, relationships, tree.culture);
+  }, [perspectiveId, people, relationships, tree?.culture]);
 
   // ---------------------------------------------------------------------------
   // Load tree
   // ---------------------------------------------------------------------------
   useEffect(() => {
     setLoading(true);
+    setNodePositions({});
     getTree(id)
       .then((res) => {
         const t = res.data;
@@ -43,7 +59,6 @@ export default function TreeView() {
         setPeople(loadedPeople);
         setRelationships(loadedRels);
         if (loadedPeople.length > 0) setPerspectiveId(loadedPeople[0].id);
-        // Seed history with the initial loaded state (not undoable)
         resetHistory({ people: loadedPeople, relationships: loadedRels, nodePositions: {} });
       })
       .catch((err) => {
@@ -54,17 +69,7 @@ export default function TreeView() {
   }, [id]);
 
   // ---------------------------------------------------------------------------
-  // Refresh kinship titles whenever perspective, culture, or data changes
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    if (!perspectiveId || !tree) return;
-    getKinship(id, perspectiveId)
-      .then((res) => setKinship(res.data))
-      .catch(() => {});
-  }, [perspectiveId, tree?.culture, people.length, relationships.length]);
-
-  // ---------------------------------------------------------------------------
-  // Undo / Redo handlers
+  // Undo / Redo
   // ---------------------------------------------------------------------------
   function handleUndo() {
     const snap = undo();
@@ -72,9 +77,6 @@ export default function TreeView() {
     setPeople(snap.people);
     setRelationships(snap.relationships);
     setNodePositions(snap.nodePositions || {});
-    if (perspectiveId) {
-      getKinship(id, perspectiveId).then((r) => setKinship(r.data)).catch(() => {});
-    }
   }
 
   function handleRedo() {
@@ -83,29 +85,25 @@ export default function TreeView() {
     setPeople(snap.people);
     setRelationships(snap.relationships);
     setNodePositions(snap.nodePositions || {});
-    if (perspectiveId) {
-      getKinship(id, perspectiveId).then((r) => setKinship(r.data)).catch(() => {});
-    }
   }
 
   // ---------------------------------------------------------------------------
-  // Keyboard shortcuts — Ctrl+Z / Cmd+Z  and  Ctrl+Y / Cmd+Shift+Z
+  // Keyboard shortcuts: Ctrl+Z / Ctrl+Y
   // ---------------------------------------------------------------------------
   useEffect(() => {
     function onKey(e) {
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-
       const ctrl = e.ctrlKey || e.metaKey;
       if (ctrl && !e.shiftKey && e.key === 'z') { e.preventDefault(); handleUndo(); }
       if (ctrl && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); handleRedo(); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [canUndo, canRedo]); // re-bind so closures see latest canUndo/canRedo
+  }, [canUndo, canRedo]);
 
   // ---------------------------------------------------------------------------
-  // Node position tracking (called from TreeCanvas on drag stop)
+  // Node position tracking
   // ---------------------------------------------------------------------------
   const handlePositionsChange = useCallback((posMap) => {
     setNodePositions(posMap);
@@ -115,17 +113,53 @@ export default function TreeView() {
   // Person CRUD
   // ---------------------------------------------------------------------------
   async function handleSavePerson(fd) {
+    let newPerson;
     let newPeople;
+
     if (personModal?.person) {
       const res = await updatePerson(id, personModal.person.id, fd);
-      newPeople = people.map((p) => (p.id === res.data.id ? res.data : p));
+      newPerson = res.data;
+      newPeople = people.map((p) => (p.id === newPerson.id ? newPerson : p));
     } else {
       const res = await createPerson(id, fd);
-      newPeople = [...people, res.data];
-      if (people.length === 0) setPerspectiveId(res.data.id);
+      newPerson = res.data;
+      newPeople = [...people, newPerson];
+      if (people.length === 0) setPerspectiveId(newPerson.id);
     }
+
     setPeople(newPeople);
-    pushHistory({ people: newPeople, relationships, nodePositions });
+
+    // Auto-create relationship when coming from a contextual (+) button
+    let newRels       = relationships;
+    let newPositions  = nodePositions;
+
+    if (pendingRelSource && newPerson && !personModal?.person) {
+      const { sourcePersonId, relType, newNodePosition } = pendingRelSource;
+
+      // Set smart initial position for the new node
+      if (newNodePosition) {
+        newPositions = { ...nodePositions, [newPerson.id]: newNodePosition };
+        setNodePositions(newPositions);
+      }
+
+      try {
+        // relType 'SPOUSE' → SPOUSE edge; 'PARENT' → source is PARENT of new child
+        const relData = {
+          fromPersonId: sourcePersonId,
+          toPersonId:   newPerson.id,
+          type:         relType === 'SPOUSE' ? 'SPOUSE' : 'PARENT',
+        };
+        const relRes = await createRelationship(id, relData);
+        newRels = [...relationships, relRes.data];
+        setRelationships(newRels);
+      } catch (err) {
+        console.error('Auto-relationship creation failed:', err);
+      }
+
+      setPendingRelSource(null);
+    }
+
+    pushHistory({ people: newPeople, relationships: newRels, nodePositions: newPositions });
   }
 
   async function handleDeletePerson() {
@@ -146,7 +180,18 @@ export default function TreeView() {
   // Relationship CRUD
   // ---------------------------------------------------------------------------
   async function handleSaveRelationship(data) {
-    const res  = await createRelationship(id, data);
+    // Validate: no self-relationship, no duplicate
+    if (data.fromPersonId === data.toPersonId) return;
+    const isDuplicate = relationships.some(
+      (r) =>
+        r.type === data.type &&
+        ((r.fromPersonId === data.fromPersonId && r.toPersonId === data.toPersonId) ||
+         (r.type !== 'PARENT' && r.type !== 'CHILD' &&
+          r.fromPersonId === data.toPersonId && r.toPersonId === data.fromPersonId))
+    );
+    if (isDuplicate) return;
+
+    const res     = await createRelationship(id, data);
     const newRels = [...relationships, res.data];
     setRelationships(newRels);
     pushHistory({ people, relationships: newRels, nodePositions });
@@ -166,10 +211,38 @@ export default function TreeView() {
     setRelModal({ relationship: edgeData });
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // Contextual (+) button handlers
+  // ---------------------------------------------------------------------------
+  function handleAddSpouseOf(sourcePersonId) {
+    const sourcePos = nodePositions[sourcePersonId];
+    const newNodePosition = sourcePos
+      ? { x: sourcePos.x + NODE_WIDTH + 120, y: sourcePos.y }
+      : null;
+    setPendingRelSource({ sourcePersonId, relType: 'SPOUSE', newNodePosition });
+    setPersonModal({ person: null });
+  }
+
+  function handleAddChildOf(sourcePersonId) {
+    const sourcePos = nodePositions[sourcePersonId];
+    const newNodePosition = sourcePos
+      ? { x: sourcePos.x, y: sourcePos.y + NODE_HEIGHT + 140 }
+      : null;
+    setPendingRelSource({ sourcePersonId, relType: 'PARENT', newNodePosition });
+    setPersonModal({ person: null });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drag-to-connect handler
+  // ---------------------------------------------------------------------------
+  async function handleConnectionComplete({ source, target, type }) {
+    await handleSaveRelationship({ fromPersonId: source, toPersonId: target, type });
+  }
+
   const perspectivePerson = people.find((p) => p.id === perspectiveId);
 
   // ---------------------------------------------------------------------------
-  // Sidebar content (desktop + mobile drawer)
+  // Sidebar
   // ---------------------------------------------------------------------------
   function SidebarContent({ onClose }) {
     return (
@@ -180,15 +253,6 @@ export default function TreeView() {
             className="w-full bg-earth-terra hover:bg-earth-terraDark text-white text-sm font-semibold py-2.5 rounded-xl transition-colors min-h-[44px]"
           >
             + Add Person
-          </button>
-        </div>
-        <div className="p-3 border-b border-veru-light">
-          <button
-            onClick={() => { setRelModal({ relationship: null }); onClose?.(); }}
-            disabled={people.length < 2}
-            className="w-full bg-earth-warmWhite hover:bg-veru-light text-veru-dark text-sm font-medium py-2.5 rounded-xl border border-veru-mid transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
-          >
-            + Add Relationship
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
@@ -214,7 +278,9 @@ export default function TreeView() {
         </div>
         <div className="p-3 border-t border-veru-light">
           <p className="text-[10px] text-gray-400 text-center leading-snug">
-            Click a node to switch perspective · Double-click to edit
+            Click node to switch perspective · Double-click to edit
+            <br />
+            Drag between nodes or use (+) to add relationships
           </p>
         </div>
       </>
@@ -251,7 +317,7 @@ export default function TreeView() {
           <SidebarContent />
         </aside>
 
-        {/* Mobile drawer overlay */}
+        {/* Mobile drawer */}
         {drawerOpen && (
           <div className="sm:hidden fixed inset-0 z-40 flex">
             <div className="flex-1 bg-black/40" onClick={() => setDrawerOpen(false)} />
@@ -299,6 +365,9 @@ export default function TreeView() {
               onPerspectiveChange={setPerspectiveId}
               onEditPerson={(person) => setPersonModal({ person })}
               onEdgeClick={handleEdgeClick}
+              onAddSpouseOf={handleAddSpouseOf}
+              onAddChildOf={handleAddChildOf}
+              onConnectionComplete={handleConnectionComplete}
               externalPositions={nodePositions}
               onPositionsChange={handlePositionsChange}
               onUndo={handleUndo}
@@ -330,7 +399,10 @@ export default function TreeView() {
           person={personModal.person}
           onSave={handleSavePerson}
           onDelete={personModal.person ? handleDeletePerson : undefined}
-          onClose={() => setPersonModal(null)}
+          onClose={() => {
+            setPersonModal(null);
+            setPendingRelSource(null); // clear pending if user cancels
+          }}
         />
       )}
       {relModal && (
