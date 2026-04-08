@@ -104,7 +104,13 @@ router.post('/register', async (req, res) => {
     const user = await prisma.user.create({ data: { name, email, passwordHash } });
 
     req.login(user, (err) => {
-      if (err) return res.status(500).json({ error: 'Login after register failed' });
+      if (err) {
+        console.error('[register] req.login error:', err);
+        return res.status(500).json({ error: 'Login after register failed' });
+      }
+      req.session.save((saveErr) => {
+        if (saveErr) console.error('[register] session.save error:', saveErr);
+      });
       return res.status(201).json({ id: user.id, name: user.name, email: user.email });
     });
   } catch (err) {
@@ -119,7 +125,13 @@ router.post('/login', (req, res, next) => {
     if (err) return next(err);
     if (!user) return res.status(401).json({ error: info?.message || 'Invalid credentials' });
     req.login(user, (loginErr) => {
-      if (loginErr) return next(loginErr);
+      if (loginErr) {
+        console.error('[login] req.login error:', loginErr);
+        return next(loginErr);
+      }
+      req.session.save((saveErr) => {
+        if (saveErr) console.error('[login] session.save error:', saveErr);
+      });
       return res.json({ id: user.id, name: user.name, email: user.email });
     });
   })(req, res, next);

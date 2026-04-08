@@ -46,6 +46,11 @@ app.use(
     store: new PrismaSessionStore(prismaForSession, {
       checkPeriod: 2 * 60 * 1000,
       dbRecordIdIsSessionId: true,
+      logger: {
+        log: () => {},
+        warn: (msg) => console.warn('[session]', msg),
+        error: (msg) => console.error('[session]', msg),
+      },
     }),
     secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
     resave: false,
