@@ -5,7 +5,7 @@ export default function PersonModal({ person, onSave, onDelete, onClose }) {
   const isEdit = Boolean(person);
   const [name,         setName]         = useState(person?.name ?? '');
   const [dob,          setDob]          = useState(person?.dob ? new Date(person.dob).toISOString().slice(0, 10) : '');
-  const [gender,       setGender]       = useState(person?.gender ?? 'OTHER');
+  const [gender,       setGender]       = useState(person?.gender ?? 'MALE');
   const [photoPreview, setPhotoPreview] = useState(person?.photoUrl ?? null);
   const [photoFile,    setPhotoFile]    = useState(null);
   const [saving,       setSaving]       = useState(false);
@@ -137,7 +137,7 @@ export default function PersonModal({ person, onSave, onDelete, onClose }) {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
             <div className="flex gap-2">
-              {['MALE', 'FEMALE', 'OTHER'].map((g) => (
+              {['MALE', 'FEMALE'].map((g) => (
                 <button
                   key={g}
                   type="button"
@@ -148,7 +148,7 @@ export default function PersonModal({ person, onSave, onDelete, onClose }) {
                       : 'bg-veru-light text-veru-dark border-veru-mid hover:bg-veru-mid'
                     }`}
                 >
-                  {g === 'MALE' ? 'Male' : g === 'FEMALE' ? 'Female' : 'Other'}
+                  {g === 'MALE' ? 'Male' : 'Female'}
                 </button>
               ))}
             </div>
