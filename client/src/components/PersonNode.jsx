@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import { Handle, Position } from 'reactflow';
 import InitialsAvatar from './InitialsAvatar';
 
@@ -22,6 +22,7 @@ function PersonNode({ data, selected }) {
     onClickNode, onEditNode, onAddSpouse, onAddChild,
   } = data;
 
+  const [isHovered, setIsHovered] = useState(false);
   const title    = kinship?.title ?? null;
   const showTamil = culture === 'TAMIL' && title?.script;
 
@@ -40,11 +41,13 @@ function PersonNode({ data, selected }) {
       `}
       onClick={() => onClickNode?.(person.id)}
       onDoubleClick={() => !isReadOnly && onEditNode?.(person)}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       title={isReadOnly ? person.name : 'Click to set perspective · Double-click to edit'}
     >
       {/* React Flow connection handles */}
-      {/* top — target only (receives parent→child edges; not draggable from) */}
-      <Handle type="target" position={Position.Top}    id="top"    className="!bg-veru-mid !w-2 !h-2 !border-0" />
+      {/* top — target only; z-index elevated so hover reveals it above badge */}
+      <Handle type="target" position={Position.Top}    id="top"    className="!bg-veru-mid !w-2 !h-2 !border-0" style={{ zIndex: 10, top: -6 }} />
       {/* bottom — source for child edges */}
       <Handle type="source" position={Position.Bottom} id="bottom" className="!bg-veru-mid !w-2 !h-2 !border-0" />
       {/* left — source + target for spouse edges */}
@@ -54,9 +57,9 @@ function PersonNode({ data, selected }) {
       <Handle type="source" position={Position.Right}  id="right"  className="!bg-veru-mid !w-2 !h-2 !border-0" />
       <Handle type="target" position={Position.Right}  id="right"  className="!bg-veru-mid !w-2 !h-2 !border-0" />
 
-      {/* Perspective badge */}
-      {isPerspective && (
-        <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-veru-accent text-white text-[9px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap z-10">
+      {/* Perspective badge — hidden on hover so top handle is accessible */}
+      {isPerspective && !isHovered && (
+        <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-veru-accent text-white text-[9px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap z-[5]">
           Viewing as
         </div>
       )}

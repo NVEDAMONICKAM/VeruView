@@ -185,10 +185,22 @@ export function findShortestPaths(perspectiveId, adjacency) {
 // Step 3 — Derive siblings via shared parents (post-BFS)
 // Overrides any longer BFS path with the canonical 'sibling' path.
 // Shorter/more-specific paths (parent, child, spouse) are never overridden.
+// Also detects step-siblings: candidate whose only parent is persp's parent's
+// non-parent spouse (BUG C fix).
 // ---------------------------------------------------------------------------
 function deriveSiblings(perspectiveId, adjacency, pathMap) {
-  const perspParentIds = adjacency[perspectiveId]?.parents.map((p) => p.id) ?? [];
+  const perspParents = adjacency[perspectiveId]?.parents ?? [];
+  const perspParentIds = perspParents.map((p) => p.id);
   if (perspParentIds.length === 0) return;
+
+  // Build set of persp's parents' spouses who are NOT also direct parents of persp
+  const perspParentSet = new Set(perspParentIds);
+  const parentSpouseIds = new Set();
+  for (const { id: pId } of perspParents) {
+    adjacency[pId]?.spouses.forEach((sId) => {
+      if (!perspParentSet.has(sId)) parentSpouseIds.add(sId);
+    });
+  }
 
   for (const [candidateId] of pathMap) {
     if (candidateId === perspectiveId) continue;
@@ -197,10 +209,14 @@ function deriveSiblings(perspectiveId, adjacency, pathMap) {
     if (currentPath === 'parent' || currentPath === 'child' || currentPath === 'spouse') continue;
 
     const candidateParentIds = adjacency[candidateId]?.parents.map((p) => p.id) ?? [];
+
+    // Check 1: shared direct parent (biological or half-sibling)
     const hasSharedParent = perspParentIds.some((id) => candidateParentIds.includes(id));
-    if (hasSharedParent) {
-      pathMap.set(candidateId, 'sibling');
-    }
+    if (hasSharedParent) { pathMap.set(candidateId, 'sibling'); continue; }
+
+    // Check 2: candidate's parent is a non-parent spouse of persp's parent (step-sibling)
+    const isStepSibling = candidateParentIds.some((id) => parentSpouseIds.has(id));
+    if (isStepSibling) { pathMap.set(candidateId, 'sibling'); }
   }
 }
 
@@ -277,15 +293,31 @@ export function deriveTitleKey(path, targetPerson, perspectivePerson, adjacency,
 
     // ── 2 hops ────────────────────────────────────────────────────────────
     case 'parent.parent': {
-      // Need to know which parent is the bridge to determine paternal/maternal
+      // Determine paternal vs maternal by finding which of persp's parents has
+      // targetPerson as their parent — that parent's gender tells us the side.
       const perspParents = adjacency[perspectivePerson?.id]?.parents ?? [];
-      // We can't know which parent is the bridge from just the path string,
-      // so use a generic grandparent key (paternal/maternal is best-effort via gender)
-      return grandparentKeyByGender(gender);
+      let bridgeGender = null;
+      for (const { id: pId } of perspParents) {
+        if (adjacency[pId]?.parents.some((gp) => gp.id === targetPerson.id)) {
+          bridgeGender = adjacency[pId]?.person?.gender;
+          break;
+        }
+      }
+      if (gender === 'MALE')   return bridgeGender === 'MALE' ? 'paternalGrandfather' : bridgeGender === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
+      if (gender === 'FEMALE') return bridgeGender === 'MALE' ? 'paternalGrandmother' : bridgeGender === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      return 'ancestor';
     }
-    case 'parent.spouse':
-      // Parent's spouse = step-parent figure (treated as father/mother)
+    case 'parent.spouse': {
+      // If target is NOT a direct parent of persp → step-parent
+      const perspParentIds = adjacency[perspectivePerson?.id]?.parents.map((p) => p.id) ?? [];
+      if (!perspParentIds.includes(targetPerson.id)) {
+        return gender === 'MALE' ? 'stepFather' : gender === 'FEMALE' ? 'stepMother' : 'relative';
+      }
+      // Edge case: target IS a parent (reached via sibling path) — check biological
+      const isBio = biologicalMap[`${targetPerson.id}:${perspectivePerson?.id}`] !== false;
+      if (!isBio) return gender === 'MALE' ? 'stepFather' : gender === 'FEMALE' ? 'stepMother' : 'relative';
       return gender === 'MALE' ? 'father' : gender === 'FEMALE' ? 'mother' : 'parent';
+    }
     case 'parent.child':
       // Reached via BFS — likely a sibling (same parent); use sibling key
       return siblingKey(perspectivePerson, targetPerson);
@@ -302,13 +334,49 @@ export function deriveTitleKey(path, targetPerson, perspectivePerson, adjacency,
     // ── 3 hops ────────────────────────────────────────────────────────────
     case 'parent.parent.parent':
       return gender === 'MALE' ? 'greatGrandfather' : gender === 'FEMALE' ? 'greatGrandmother' : 'ancestor';
-    case 'parent.parent.spouse':
-      // Grandparent's spouse = the other grandparent (KEY FIX)
-      return grandparentKeyByGender(gender);
-    case 'parent.parent.child':
-      // Uncle / aunt — path via grandparent's other child; can't reliably know
-      // which parent is the bridge here so fall back to generic uncle/aunt key
+    case 'parent.parent.spouse': {
+      // Grandparent's spouse = the other grandparent — determine paternal/maternal
+      const perspParents2 = adjacency[perspectivePerson?.id]?.parents ?? [];
+      let bridgeGender2 = null;
+      outer2: for (const { id: pId } of perspParents2) {
+        for (const { id: gpId } of (adjacency[pId]?.parents ?? [])) {
+          if (adjacency[gpId]?.spouses.includes(targetPerson.id)) {
+            bridgeGender2 = adjacency[pId]?.person?.gender;
+            break outer2;
+          }
+        }
+      }
+      if (gender === 'MALE')   return bridgeGender2 === 'MALE' ? 'paternalGrandfather' : bridgeGender2 === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
+      if (gender === 'FEMALE') return bridgeGender2 === 'MALE' ? 'paternalGrandmother' : bridgeGender2 === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      return 'ancestor';
+    }
+    case 'parent.parent.child': {
+      // Uncle/aunt — find bridge parent to determine paternal/maternal and older/younger
+      const perspParents3 = adjacency[perspectivePerson?.id]?.parents ?? [];
+      let bridgePerson = null;
+      outer3: for (const { id: pId } of perspParents3) {
+        for (const { id: gpId } of (adjacency[pId]?.parents ?? [])) {
+          if (adjacency[gpId]?.children.includes(targetPerson.id)) {
+            bridgePerson = adjacency[pId]?.person;
+            break outer3;
+          }
+        }
+      }
+      const bGender = bridgePerson?.gender;
+      const bDob = bridgePerson?.dob ? new Date(bridgePerson.dob) : null;
+      const tDob = targetPerson.dob  ? new Date(targetPerson.dob)  : null;
+      // isOlder: target born before bridge parent → uncle/aunt is older
+      const isOlderThanBridge = bDob && tDob ? tDob < bDob : null;
+      if (bGender === 'MALE') {
+        if (gender === 'MALE')   return isOlderThanBridge === null ? 'fathersBrother' : isOlderThanBridge ? 'fathersOlderBrother' : 'fathersYoungerBrother';
+        if (gender === 'FEMALE') return 'fathersSister';
+      }
+      if (bGender === 'FEMALE') {
+        if (gender === 'MALE')   return 'mothersBrother';
+        if (gender === 'FEMALE') return isOlderThanBridge === null ? 'mothersSister' : isOlderThanBridge ? 'mothersOlderSister' : 'mothersYoungerSister';
+      }
       return gender === 'MALE' ? 'fathersBrother' : gender === 'FEMALE' ? 'fathersSister' : 'relative';
+    }
     case 'parent.spouse.parent':
       return gender === 'MALE' ? 'fatherInLaw' : gender === 'FEMALE' ? 'motherInLaw' : 'relative';
     case 'parent.child.child':

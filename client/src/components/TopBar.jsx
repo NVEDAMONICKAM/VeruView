@@ -112,8 +112,14 @@ export default function TopBar({ tree, perspectiveName, onTreeUpdate, isReadOnly
           )}
         </div>
 
-        {/* Desktop: culture toggle + share */}
+        {/* Desktop: perspective indicator + culture toggle + share */}
         <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
+          {perspectiveName && (
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 bg-veru-light border border-veru-mid rounded-full px-3 py-1 flex-shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-veru-accent inline-block" />
+              Viewing as <span className="font-semibold text-veru-dark ml-0.5">{perspectiveName}</span>
+            </div>
+          )}
           {cultureToggle}
           {shareButton}
         </div>
@@ -139,6 +145,12 @@ export default function TopBar({ tree, perspectiveName, onTreeUpdate, isReadOnly
             className="absolute top-14 left-0 right-0 bg-earth-warmWhite border-b border-veru-mid shadow-lg px-4 py-4 flex flex-col gap-3"
             onClick={(e) => e.stopPropagation()}
           >
+            {perspectiveName && (
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <span className="w-2 h-2 rounded-full bg-veru-accent inline-block flex-shrink-0" />
+                <span>Viewing as <strong className="text-veru-dark">{perspectiveName}</strong></span>
+              </div>
+            )}
             <div className="flex gap-2 flex-wrap">
               {cultureToggle}
               {shareButton}

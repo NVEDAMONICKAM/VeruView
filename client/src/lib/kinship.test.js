@@ -215,3 +215,110 @@ describe('computeAllKinshipTitles', () => {
     expect(r).toEqual({});
   });
 });
+
+// ---------------------------------------------------------------------------
+// 4-person minimal family — focuses on step-parent and BUG-C (step-sibling
+// detection via parent-spouse chain)
+//
+//   PAPA ─┬─ MAMA
+//   (PARENT)KID   STEP(PARENT)
+//
+//  KID's only parent is PAPA; STEP's only parent is MAMA.
+//  PAPA ↔ MAMA are spouses.
+//  From KID's perspective: MAMA = step-mother, STEP = older step-sister.
+// ---------------------------------------------------------------------------
+describe('4-person minimal family (step-parent + step-sibling BUG C)', () => {
+  const papa = p('papa', 'Papa', 'MALE',   '1960-01-01');
+  const mama = p('mama', 'Mama', 'FEMALE', '1965-01-01');
+  const kid  = p('kid',  'Kid',  'MALE',   '1990-01-01');
+  const step = p('step', 'Step', 'FEMALE', '1988-06-01'); // older than kid
+
+  const people4 = [papa, mama, kid, step];
+  const rels4 = [
+    rel('x1', 'papa', 'kid',  'PARENT'),
+    rel('x2', 'mama', 'step', 'PARENT'),
+    rel('x3', 'papa', 'mama', 'SPOUSE'),
+  ];
+
+  const r4 = computeAllKinshipTitles('kid', people4, rels4, 'ENGLISH');
+
+  it('4p: identifies biological father', () => {
+    expect(key(r4, 'papa')).toBe('father');
+  });
+
+  it('4p: step-mother — parent\'s spouse who is NOT a direct parent', () => {
+    expect(key(r4, 'mama')).toBe('stepMother');
+  });
+
+  it('4p: BUG C — step-sibling detected via parent-spouse-child chain', () => {
+    // step is mama's child; mama is papa's spouse; papa is kid's parent
+    // they share no direct parent → step is a step-sibling
+    expect(key(r4, 'step')).toBe('olderSister');
+  });
+
+  // Order variant: relationships listed in reverse order
+  it('4p: order-invariant — same result when rels are reversed', () => {
+    const r4rev = computeAllKinshipTitles('kid', [...people4].reverse(), [...rels4].reverse(), 'ENGLISH');
+    expect(key(r4rev, 'papa')).toBe('father');
+    expect(key(r4rev, 'mama')).toBe('stepMother');
+    expect(key(r4rev, 'step')).toBe('olderSister');
+  });
+
+  // CHILD edge direction instead of PARENT
+  it('4p: order-invariant — CHILD edges give same result as PARENT edges', () => {
+    const relsChild = [
+      rel('x1c', 'kid',  'papa', 'CHILD'),
+      rel('x2c', 'step', 'mama', 'CHILD'),
+      rel('x3c', 'papa', 'mama', 'SPOUSE'),
+    ];
+    const r4c = computeAllKinshipTitles('kid', people4, relsChild, 'ENGLISH');
+    expect(key(r4c, 'papa')).toBe('father');
+    expect(key(r4c, 'mama')).toBe('stepMother');
+    expect(key(r4c, 'step')).toBe('olderSister');
+  });
+
+  // Paternal grandparent via paternal bridge
+  it('4p: paternal grandfather identified correctly', () => {
+    const gf  = p('gf',  'Grandpa', 'MALE', '1930-01-01');
+    const dad = p('dad', 'Dad',     'MALE', '1960-01-01');
+    const ch  = p('ch',  'Child',   'MALE', '1990-01-01');
+    const rg = [
+      rel('g1', 'gf',  'dad', 'PARENT'),
+      rel('g2', 'dad', 'ch',  'PARENT'),
+    ];
+    const rg4 = computeAllKinshipTitles('ch', [gf, dad, ch], rg, 'ENGLISH');
+    expect(key(rg4, 'gf')).toBe('paternalGrandfather');
+  });
+
+  // Maternal grandmother identified correctly
+  it('4p: maternal grandmother identified correctly', () => {
+    const gm  = p('gm',  'Grandma', 'FEMALE', '1930-01-01');
+    const mom = p('mom', 'Mom',     'FEMALE', '1960-01-01');
+    const ch  = p('ch',  'Child',   'MALE',   '1990-01-01');
+    const rg = [
+      rel('g1', 'gm',  'mom', 'PARENT'),
+      rel('g2', 'mom', 'ch',  'PARENT'),
+    ];
+    const rg4 = computeAllKinshipTitles('ch', [gm, mom, ch], rg, 'ENGLISH');
+    expect(key(rg4, 'gm')).toBe('maternalGrandmother');
+  });
+
+  // Edge: both biological parents — neither should be step
+  it('4p: both biological parents are NOT step-parents', () => {
+    const rBio = [
+      rel('b1', 'papa', 'kid',  'PARENT'),
+      rel('b2', 'mama', 'kid',  'PARENT'),
+      rel('b3', 'papa', 'mama', 'SPOUSE'),
+    ];
+    const r4b = computeAllKinshipTitles('kid', people4, rBio, 'ENGLISH');
+    expect(key(r4b, 'papa')).toBe('father');
+    expect(key(r4b, 'mama')).toBe('mother');  // biological, not step
+  });
+
+  // Edge: isolated person in tree has no kinship key
+  it('4p: isolated person in tree has null kinship key', () => {
+    const iso = p('iso', 'Isolated', 'MALE');
+    const r4i = computeAllKinshipTitles('kid', [...people4, iso], rels4, 'ENGLISH');
+    expect(key(r4i, 'iso')).toBeNull();
+  });
+});

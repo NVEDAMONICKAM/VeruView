@@ -211,10 +211,11 @@ function UndoRedoButtons({ onUndo, onRedo, canUndo, canRedo }) {
 // ---------------------------------------------------------------------------
 // Auto-organise button — must be inside <ReactFlow> to access useReactFlow
 // ---------------------------------------------------------------------------
-function AutoOrganisePanel({ nodes, edges, onSetNodes, onPositionsChange }) {
+function AutoOrganisePanel({ nodes, edges, onSetNodes, onPositionsChange, onResetLayout }) {
   const { fitView } = useReactFlow();
 
   function organise() {
+    onResetLayout?.();                      // clear manual flag + saved positions
     const laidOut = computeLayout(nodes, edges, {});
     const posMap  = {};
     laidOut.forEach((n) => { posMap[n.id] = n.position; });
@@ -358,6 +359,10 @@ export default function TreeCanvas({
   // First-layout flag — fires onPositionsChange once to seed TreeView state
   const firstLayoutRef = useRef(true);
 
+  // hasUserMovedNodes — when true, rebuilds preserve user-placed positions
+  // instead of re-running dagre layout (prevents consecutive-drag snap-back)
+  const hasUserMovedNodes = useRef(false);
+
   const handlers = useMemo(
     () => ({
       onClickNode: (personId) => onPerspectiveChange?.(personId),
@@ -383,13 +388,14 @@ export default function TreeCanvas({
   }, [externalPositions]);
 
   // ── Full rebuild when people/relationships/display data changes ────────────
-  // Uses localPositionsRef (not externalPositions) so the positions read here
-  // are always current — even if this effect fires immediately after a drag
-  // (where externalPositions hasn't propagated back yet but localPositionsRef
-  // was already updated synchronously in handleNodeDragStop).
+  // When user has manually dragged nodes (hasUserMovedNodes), we update node
+  // data but PRESERVE positions from localPositionsRef — no dagre layout.
+  // This prevents consecutive-drag snap-back caused by re-renders triggered by
+  // kinship/perspective/handlers updates immediately after a drag.
   useEffect(() => {
     if (people.length === 0) {
       firstLayoutRef.current = true;
+      hasUserMovedNodes.current = false;
       localPositionsRef.current = {};
       setNodes([]);
       setEdges([]);
@@ -399,17 +405,36 @@ export default function TreeCanvas({
     const { nodes: rawNodes, edges: rawEdges } = buildFlowElements(
       people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers, localPositionsRef.current
     );
-    const laidOut = computeLayout(rawNodes, rawEdges, localPositionsRef.current);
-    setNodes(laidOut);
-    setEdges(rawEdges);
 
-    // On first layout with data, publish all positions so TreeView can persist them.
-    if (firstLayoutRef.current) {
-      firstLayoutRef.current = false;
-      const posMap = {};
-      laidOut.forEach((n) => { posMap[n.id] = n.position; });
-      localPositionsRef.current = posMap;
-      onPositionsChange?.(posMap);
+    if (hasUserMovedNodes.current) {
+      // Preserve all user-placed positions; only compute layout for brand-new nodes
+      const saved = localPositionsRef.current;
+      const newNodes = rawNodes.filter((n) => !saved[n.id]);
+      let extraPositions = {};
+      if (newNodes.length > 0) {
+        const partial = computeLayout(rawNodes, rawEdges, saved);
+        newNodes.forEach((n) => {
+          const laid = partial.find((l) => l.id === n.id);
+          if (laid) extraPositions[n.id] = laid.position;
+        });
+      }
+      setNodes(rawNodes.map((n) => ({
+        ...n,
+        position: saved[n.id] ?? extraPositions[n.id] ?? n.position,
+      })));
+      setEdges(rawEdges);
+    } else {
+      const laidOut = computeLayout(rawNodes, rawEdges, localPositionsRef.current);
+      setNodes(laidOut);
+      setEdges(rawEdges);
+      // On first layout with data, publish positions so TreeView can persist them.
+      if (firstLayoutRef.current) {
+        firstLayoutRef.current = false;
+        const posMap = {};
+        laidOut.forEach((n) => { posMap[n.id] = n.position; });
+        localPositionsRef.current = posMap;
+        onPositionsChange?.(posMap);
+      }
     }
   }, [people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers]);
 
@@ -489,10 +514,17 @@ export default function TreeCanvas({
       const posMap = {};
       allNodes.forEach((n) => { posMap[n.id] = n.position; });
       localPositionsRef.current = posMap;   // synchronous — always current
+      hasUserMovedNodes.current = true;     // guard subsequent rebuilds
       onPositionsChange?.(posMap);          // async — propagates to TreeView state
     },
     [onPositionsChange]
   );
+
+  // Called by AutoOrganisePanel to reset manual positions and re-run full layout
+  const handleResetLayout = useCallback(() => {
+    hasUserMovedNodes.current = false;
+    localPositionsRef.current = {};
+  }, []);
 
   return (
     <div className="w-full h-full">
@@ -541,25 +573,13 @@ export default function TreeCanvas({
               edges={edges}
               onSetNodes={setNodes}
               onPositionsChange={onPositionsChange}
+              onResetLayout={handleResetLayout}
             />
           </Panel>
         )}
 
         <Panel position="bottom-left">
-          <div className="flex flex-col gap-2 items-start">
-            {/* "Viewing as" pill — floats above legend, never overlaps nodes */}
-            {perspectiveId && (() => {
-              const perspName = people.find((p) => p.id === perspectiveId)?.name;
-              return perspName ? (
-                <div className="flex items-center gap-1.5 text-xs bg-[#D4EDDA] text-[#3A7D5C] border border-[#A8D5B5] rounded-full px-3 py-1 shadow-sm"
-                  style={{ fontFamily: 'Inter, sans-serif' }}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#3A7D5C] inline-block flex-shrink-0" />
-                  Viewing as <span className="font-semibold ml-0.5">{perspName}</span>
-                </div>
-              ) : null;
-            })()}
-            <EdgeLegend />
-          </div>
+          <EdgeLegend />
         </Panel>
 
         <MiniMap

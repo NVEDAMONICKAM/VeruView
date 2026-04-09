@@ -180,10 +180,22 @@ function bfsKinship(graph, perspectiveId) {
 
 // ---------------------------------------------------------------------------
 // Step 3 — Derive siblings via shared parents (post-BFS)
+// Also detects step-siblings: candidate whose only parent is persp's parent's
+// non-parent spouse (BUG C fix).
 // ---------------------------------------------------------------------------
 function deriveSiblings(perspectiveId, graph, pathMap) {
-  const perspParentIds = (graph[perspectiveId]?.parents ?? []).map((p) => p.id);
+  const perspParents = graph[perspectiveId]?.parents ?? [];
+  const perspParentIds = perspParents.map((p) => p.id);
   if (perspParentIds.length === 0) return;
+
+  // Build set of persp's parents' spouses who are NOT also direct parents of persp
+  const perspParentSet = new Set(perspParentIds);
+  const parentSpouseIds = new Set();
+  for (const { id: pId } of perspParents) {
+    graph[pId]?.spouses.forEach((sId) => {
+      if (!perspParentSet.has(sId)) parentSpouseIds.add(sId);
+    });
+  }
 
   for (const [candidateId] of pathMap) {
     if (candidateId === perspectiveId) continue;
@@ -191,10 +203,14 @@ function deriveSiblings(perspectiveId, graph, pathMap) {
     if (currentPath === 'parent' || currentPath === 'child' || currentPath === 'spouse') continue;
 
     const candidateParentIds = (graph[candidateId]?.parents ?? []).map((p) => p.id);
+
+    // Check 1: shared direct parent
     const hasSharedParent = perspParentIds.some((id) => candidateParentIds.includes(id));
-    if (hasSharedParent) {
-      pathMap.set(candidateId, 'sibling');
-    }
+    if (hasSharedParent) { pathMap.set(candidateId, 'sibling'); continue; }
+
+    // Check 2: candidate's parent is a non-parent spouse of persp's parent (step-sibling)
+    const isStepSibling = candidateParentIds.some((id) => parentSpouseIds.has(id));
+    if (isStepSibling) { pathMap.set(candidateId, 'sibling'); }
   }
 }
 
@@ -218,7 +234,7 @@ function deriveExtended(graph, pathMap) {
 // ---------------------------------------------------------------------------
 // Step 5 — Title key from path string
 // ---------------------------------------------------------------------------
-function deriveTitleKey(path, targetPerson, perspectivePerson, biologicalMap) {
+function deriveTitleKey(path, targetPerson, perspectivePerson, biologicalMap, graph) {
   const gender = targetPerson?.gender;
 
   switch (path) {
@@ -238,11 +254,31 @@ function deriveTitleKey(path, targetPerson, perspectivePerson, biologicalMap) {
     case 'sibling':
       return siblingKey(perspectivePerson, targetPerson);
 
-    case 'parent.parent':
-      return grandparentKeyByGender(gender);
-    case 'parent.spouse':
-      // Parent's spouse = step-parent figure (treat as father/mother)
+    case 'parent.parent': {
+      // Determine paternal vs maternal by finding which of persp's parents has
+      // targetPerson as their parent — that parent's gender tells us the side.
+      const perspParents = graph[perspectivePerson?.id]?.parents ?? [];
+      let bridgeGender = null;
+      for (const { id: pId } of perspParents) {
+        if (graph[pId]?.parents.some((gp) => gp.id === targetPerson.id)) {
+          bridgeGender = graph[pId]?.person?.gender;
+          break;
+        }
+      }
+      if (gender === 'MALE')   return bridgeGender === 'MALE' ? 'paternalGrandfather' : bridgeGender === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
+      if (gender === 'FEMALE') return bridgeGender === 'MALE' ? 'paternalGrandmother' : bridgeGender === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      return 'ancestor';
+    }
+    case 'parent.spouse': {
+      // If target is NOT a direct parent of persp → step-parent
+      const perspParentIds = (graph[perspectivePerson?.id]?.parents ?? []).map((p) => p.id);
+      if (!perspParentIds.includes(targetPerson.id)) {
+        return gender === 'MALE' ? 'stepFather' : gender === 'FEMALE' ? 'stepMother' : 'relative';
+      }
+      const isBio = biologicalMap[`${targetPerson.id}:${perspectivePerson?.id}`] !== false;
+      if (!isBio) return gender === 'MALE' ? 'stepFather' : gender === 'FEMALE' ? 'stepMother' : 'relative';
       return gender === 'MALE' ? 'father' : gender === 'FEMALE' ? 'mother' : 'parent';
+    }
     case 'parent.child':
       return siblingKey(perspectivePerson, targetPerson);
     case 'child.child':
@@ -256,11 +292,48 @@ function deriveTitleKey(path, targetPerson, perspectivePerson, biologicalMap) {
 
     case 'parent.parent.parent':
       return gender === 'MALE' ? 'greatGrandfather' : gender === 'FEMALE' ? 'greatGrandmother' : 'ancestor';
-    case 'parent.parent.spouse':
-      // Grandparent's spouse = the other grandparent (KEY FIX)
-      return grandparentKeyByGender(gender);
-    case 'parent.parent.child':
+    case 'parent.parent.spouse': {
+      // Grandparent's spouse = the other grandparent — determine paternal/maternal
+      const perspParents2 = graph[perspectivePerson?.id]?.parents ?? [];
+      let bridgeGender2 = null;
+      outer2: for (const { id: pId } of perspParents2) {
+        for (const { id: gpId } of (graph[pId]?.parents ?? [])) {
+          if (graph[gpId]?.spouses.includes(targetPerson.id)) {
+            bridgeGender2 = graph[pId]?.person?.gender;
+            break outer2;
+          }
+        }
+      }
+      if (gender === 'MALE')   return bridgeGender2 === 'MALE' ? 'paternalGrandfather' : bridgeGender2 === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
+      if (gender === 'FEMALE') return bridgeGender2 === 'MALE' ? 'paternalGrandmother' : bridgeGender2 === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      return 'ancestor';
+    }
+    case 'parent.parent.child': {
+      // Uncle/aunt — find bridge parent to determine paternal/maternal and older/younger
+      const perspParents3 = graph[perspectivePerson?.id]?.parents ?? [];
+      let bridgePerson = null;
+      outer3: for (const { id: pId } of perspParents3) {
+        for (const { id: gpId } of (graph[pId]?.parents ?? [])) {
+          if (graph[gpId]?.children.includes(targetPerson.id)) {
+            bridgePerson = graph[pId]?.person;
+            break outer3;
+          }
+        }
+      }
+      const bGender = bridgePerson?.gender;
+      const bDob = bridgePerson?.dob ? new Date(bridgePerson.dob) : null;
+      const tDob = targetPerson.dob  ? new Date(targetPerson.dob)  : null;
+      const isOlderThanBridge = bDob && tDob ? tDob < bDob : null;
+      if (bGender === 'MALE') {
+        if (gender === 'MALE')   return isOlderThanBridge === null ? 'fathersBrother' : isOlderThanBridge ? 'fathersOlderBrother' : 'fathersYoungerBrother';
+        if (gender === 'FEMALE') return 'fathersSister';
+      }
+      if (bGender === 'FEMALE') {
+        if (gender === 'MALE')   return 'mothersBrother';
+        if (gender === 'FEMALE') return isOlderThanBridge === null ? 'mothersSister' : isOlderThanBridge ? 'mothersOlderSister' : 'mothersYoungerSister';
+      }
       return gender === 'MALE' ? 'fathersBrother' : gender === 'FEMALE' ? 'fathersSister' : 'relative';
+    }
     case 'parent.spouse.parent':
       return gender === 'MALE' ? 'fatherInLaw' : gender === 'FEMALE' ? 'motherInLaw' : 'relative';
     case 'parent.child.child':
@@ -365,7 +438,7 @@ function computeKinship(people, relationships, perspectiveId, culture, titleOver
       continue;
     }
 
-    const titleKey = deriveTitleKey(path, person, perspectivePerson, biologicalMap);
+    const titleKey = deriveTitleKey(path, person, perspectivePerson, biologicalMap, graph);
 
     if (!titleKey) {
       // Reachable but not specifically modelled → relative
