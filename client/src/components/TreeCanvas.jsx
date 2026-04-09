@@ -61,8 +61,9 @@ function computeLayout(rfNodes, rfEdges, externalPositions = {}) {
 
 // ---------------------------------------------------------------------------
 // Build ReactFlow nodes + edges (SIBLING filtered out)
+// positions — current known positions used to assign correct left/right for spouse edges
 // ---------------------------------------------------------------------------
-function buildFlowElements(people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers) {
+function buildFlowElements(people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers, positions = {}) {
   const nodes = people.map((person, i) => ({
     id:   person.id,
     type: 'person',
@@ -91,23 +92,44 @@ function buildFlowElements(people, relationships, kinship, perspectiveId, cultur
     seen.add(pairKey);
 
     const isHierarchical = rel.type === 'PARENT' || rel.type === 'CHILD';
-    const [src, tgt] =
-      rel.type === 'PARENT' ? [rel.fromPersonId, rel.toPersonId] :
-      rel.type === 'CHILD'  ? [rel.toPersonId,   rel.fromPersonId] :
-      [rel.fromPersonId, rel.toPersonId];
+    const isSpouse       = rel.type === 'SPOUSE';
+
+    let src, tgt, sourceHandle, targetHandle, edgeType;
+
+    if (isHierarchical) {
+      // Parent is always source (bottom), child is target (top)
+      [src, tgt] =
+        rel.type === 'PARENT' ? [rel.fromPersonId, rel.toPersonId] :
+                                [rel.toPersonId,   rel.fromPersonId];
+      sourceHandle = 'bottom';
+      targetHandle = 'top';
+      edgeType     = 'default';
+    } else {
+      // SPOUSE: leftmost person as source (right handle) → rightmost as target (left handle)
+      const fPos = positions[rel.fromPersonId];
+      const tPos = positions[rel.toPersonId];
+      const fromIsLeft = !fPos || !tPos || fPos.x <= tPos.x;
+      src = fromIsLeft ? rel.fromPersonId : rel.toPersonId;
+      tgt = fromIsLeft ? rel.toPersonId   : rel.fromPersonId;
+      sourceHandle = 'right';
+      targetHandle = 'left';
+      edgeType     = 'straight';
+    }
 
     const { color } = EDGE_CONFIG[rel.type] ?? EDGE_CONFIG.PARENT;
 
     edges.push({
-      id:     rel.id,
-      source: src,
-      target: tgt,
-      type:   'default', // bezier for all edges
-      animated: false,
-      data:   { type: rel.type, relId: rel.id },
-      style:  { stroke: color, strokeWidth: 2 },
-      label:  undefined,
-      markerEnd: isHierarchical
+      id:           rel.id,
+      source:       src,
+      target:       tgt,
+      sourceHandle,
+      targetHandle,
+      type:         edgeType,
+      animated:     false,
+      data:         { type: rel.type, relId: rel.id, isBiological: rel.isBiological ?? true, fromPersonId: rel.fromPersonId, toPersonId: rel.toPersonId },
+      style:        { stroke: color, strokeWidth: 2 },
+      label:        undefined,
+      markerEnd:    isHierarchical
         ? { type: MarkerType.ArrowClosed, color, width: 12, height: 12 }
         : undefined,
     });
@@ -258,6 +280,47 @@ function ConnectionTypePopup({ connection, people, onConfirm, onCancel }) {
 }
 
 // ---------------------------------------------------------------------------
+// Biological / Step-parent prompt — shown after PARENT or CHILD connection type chosen
+// ---------------------------------------------------------------------------
+function BiologicalPrompt({ connection, people, onConfirm, onCancel }) {
+  const peopleMap  = Object.fromEntries(people.map((p) => [p.id, p]));
+  const isParent   = connection.type === 'PARENT';
+  const parentName = peopleMap[isParent ? connection.source : connection.target]?.name ?? '…';
+  const childName  = peopleMap[isParent ? connection.target : connection.source]?.name ?? '…';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
+      <div className="bg-earth-warmWhite rounded-2xl shadow-2xl w-full max-w-xs p-5 space-y-3">
+        <p className="text-sm font-semibold text-veru-dark text-center" style={{ fontFamily: 'Georgia, serif' }}>
+          Parental relationship type
+        </p>
+        <p className="text-xs text-gray-500 text-center">
+          Is <span className="font-medium text-gray-800">{parentName}</span> a biological or step-parent of{' '}
+          <span className="font-medium text-gray-800">{childName}</span>?
+        </p>
+        <div className="space-y-2 pt-1">
+          <button
+            onClick={() => onConfirm(true)}
+            className="w-full text-left px-4 py-2.5 rounded-xl border border-gray-200 hover:border-veru-accent hover:bg-veru-light text-sm text-gray-700 transition-colors"
+          >
+            Biological parent
+          </button>
+          <button
+            onClick={() => onConfirm(false)}
+            className="w-full text-left px-4 py-2.5 rounded-xl border border-gray-200 hover:border-veru-accent hover:bg-veru-light text-sm text-gray-700 transition-colors"
+          >
+            Step-parent
+          </button>
+        </div>
+        <button onClick={onCancel} className="w-full text-center text-xs text-gray-400 hover:text-gray-600 pt-1">
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main TreeCanvas component
 // ---------------------------------------------------------------------------
 export default function TreeCanvas({
@@ -284,8 +347,10 @@ export default function TreeCanvas({
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [activeEdgeId,      setActiveEdgeId]      = useState(null);
-  const [pendingConnection, setPendingConnection]  = useState(null);
+  const [activeEdgeId,       setActiveEdgeId]       = useState(null);
+  const [pendingConnection,  setPendingConnection]   = useState(null);
+  // pendingBioConnection holds a confirmed type (PARENT/CHILD) waiting for biological choice
+  const [pendingBioConnection, setPendingBioConnection] = useState(null);
 
   // Ref so layout effect can read latest positions without re-triggering on drag
   const externalPositionsRef = useRef(externalPositions);
@@ -315,7 +380,7 @@ export default function TreeCanvas({
     }
 
     const { nodes: rawNodes, edges: rawEdges } = buildFlowElements(
-      people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers
+      people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers, externalPositionsRef.current
     );
     const laidOut = computeLayout(rawNodes, rawEdges, externalPositionsRef.current);
     setNodes(laidOut);
@@ -387,10 +452,25 @@ export default function TreeCanvas({
   const handleConnectionConfirm = useCallback(
     (type) => {
       if (!pendingConnection) return;
-      onConnectionComplete?.({ source: pendingConnection.source, target: pendingConnection.target, type });
-      setPendingConnection(null);
+      if (type === 'PARENT' || type === 'CHILD') {
+        // Need to ask biological vs step before completing
+        setPendingBioConnection({ source: pendingConnection.source, target: pendingConnection.target, type });
+        setPendingConnection(null);
+      } else {
+        onConnectionComplete?.({ source: pendingConnection.source, target: pendingConnection.target, type, isBiological: true });
+        setPendingConnection(null);
+      }
     },
     [pendingConnection, onConnectionComplete]
+  );
+
+  const handleBioConfirm = useCallback(
+    (isBiological) => {
+      if (!pendingBioConnection) return;
+      onConnectionComplete?.({ ...pendingBioConnection, isBiological });
+      setPendingBioConnection(null);
+    },
+    [pendingBioConnection, onConnectionComplete]
   );
 
   // ── Drag-stop: save all positions ─────────────────────────────────────────
@@ -471,6 +551,16 @@ export default function TreeCanvas({
           people={people}
           onConfirm={handleConnectionConfirm}
           onCancel={() => setPendingConnection(null)}
+        />
+      )}
+
+      {/* Biological / step-parent picker (shown after PARENT or CHILD is chosen) */}
+      {pendingBioConnection && !isReadOnly && (
+        <BiologicalPrompt
+          connection={pendingBioConnection}
+          people={people}
+          onConfirm={handleBioConfirm}
+          onCancel={() => setPendingBioConnection(null)}
         />
       )}
     </div>

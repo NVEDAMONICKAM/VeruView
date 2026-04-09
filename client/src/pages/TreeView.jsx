@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   getTree,
   createPerson, updatePerson, deletePerson,
-  createRelationship, deleteRelationship,
+  createRelationship, updateRelationship, deleteRelationship,
+  patchNodePositions,
 } from '../api/client';
 import TopBar from '../components/TopBar';
 import TreeCanvas from '../components/TreeCanvas';
@@ -14,6 +15,81 @@ import { computeAllKinshipTitles } from '../lib/kinship';
 
 const NODE_WIDTH  = 176;
 const NODE_HEIGHT = 220;
+
+// ---------------------------------------------------------------------------
+// Spouse-children prompt — asks whether the new spouse is a parent of each
+// existing child of their partner
+// ---------------------------------------------------------------------------
+function SpouseChildrenPrompt({ newPerson, children, onComplete, onSkip }) {
+  // choices: { [childId]: 'biological' | 'step' | 'none' }
+  const [choices, setChoices] = useState(() =>
+    Object.fromEntries(children.map((c) => [c.id, 'none']))
+  );
+
+  function setChoice(childId, value) {
+    setChoices((prev) => ({ ...prev, [childId]: value }));
+  }
+
+  const btnBase    = 'flex-1 py-1.5 text-xs font-medium rounded-lg border transition-colors';
+  const btnActive  = 'bg-veru-accent text-white border-veru-accent';
+  const btnPassive = 'bg-white text-gray-600 border-gray-200 hover:border-veru-mid';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className="bg-earth-warmWhite rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4">
+        <p className="text-sm font-semibold text-veru-dark text-center" style={{ fontFamily: 'Georgia, serif' }}>
+          Does <span className="text-veru-accent">{newPerson.name}</span> have a parental relationship with any of these children?
+        </p>
+        <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+          {children.map((child) => (
+            <div key={child.id} className="space-y-1">
+              <p className="text-xs font-medium text-gray-700">{child.name}</p>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setChoice(child.id, 'biological')}
+                  className={`${btnBase} ${choices[child.id] === 'biological' ? btnActive : btnPassive}`}
+                >
+                  Biological
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChoice(child.id, 'step')}
+                  className={`${btnBase} ${choices[child.id] === 'step' ? btnActive : btnPassive}`}
+                >
+                  Step-parent
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChoice(child.id, 'none')}
+                  className={`${btnBase} ${choices[child.id] === 'none' ? btnActive : btnPassive}`}
+                >
+                  No relation
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onSkip}
+            className="flex-1 py-2 text-sm text-gray-500 border border-gray-200 rounded-xl hover:bg-gray-50"
+          >
+            Skip
+          </button>
+          <button
+            type="button"
+            onClick={() => onComplete(choices)}
+            className="flex-1 py-2 text-sm font-semibold bg-veru-accent text-white rounded-xl hover:bg-veru-dark transition-colors"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function TreeView() {
   const { id }   = useParams();
@@ -32,12 +108,18 @@ export default function TreeView() {
 
   // Contextual add state — set before opening PersonModal from a (+) button
   // { sourcePersonId, relType: 'SPOUSE'|'PARENT', newNodePosition }
-  const [pendingRelSource, setPendingRelSource] = useState(null);
+  const [pendingRelSource,    setPendingRelSource]    = useState(null);
+  // Spouse-children prompt state
+  const [spouseChildPrompt,   setSpouseChildPrompt]   = useState(null);
+  // { newPersonId, newPersonName, newPerson, partnerChildren: [person] }
 
   const { pushHistory, resetHistory, undo, redo, canUndo, canRedo } = useHistory();
 
+  // Debounced position save — persist after drag ends
+  const positionSaveTimer = useRef(null);
+
   // ---------------------------------------------------------------------------
-  // Kinship — computed client-side, no API call
+  // Kinship — computed client-side
   // ---------------------------------------------------------------------------
   const kinship = useMemo(() => {
     if (!perspectiveId || !tree) return {};
@@ -56,10 +138,16 @@ export default function TreeView() {
         setTree(t);
         const loadedPeople = Array.isArray(t.people)        ? t.people        : [];
         const loadedRels   = Array.isArray(t.relationships) ? t.relationships : [];
+        // Load persisted positions from backend
+        const loadedPositions =
+          t.nodePositionsJson && typeof t.nodePositionsJson === 'object' && !Array.isArray(t.nodePositionsJson)
+            ? t.nodePositionsJson
+            : {};
         setPeople(loadedPeople);
         setRelationships(loadedRels);
+        setNodePositions(loadedPositions);
         if (loadedPeople.length > 0) setPerspectiveId(loadedPeople[0].id);
-        resetHistory({ people: loadedPeople, relationships: loadedRels, nodePositions: {} });
+        resetHistory({ people: loadedPeople, relationships: loadedRels, nodePositions: loadedPositions });
       })
       .catch((err) => {
         if (err.response?.status === 404) navigate('/');
@@ -103,11 +191,26 @@ export default function TreeView() {
   }, [canUndo, canRedo]);
 
   // ---------------------------------------------------------------------------
-  // Node position tracking
+  // Node position tracking — persists to backend after drag
   // ---------------------------------------------------------------------------
   const handlePositionsChange = useCallback((posMap) => {
     setNodePositions(posMap);
-  }, []);
+    clearTimeout(positionSaveTimer.current);
+    positionSaveTimer.current = setTimeout(() => {
+      patchNodePositions(id, posMap).catch((err) =>
+        console.error('Failed to persist node positions:', err)
+      );
+    }, 800);
+  }, [id]);
+
+  // ---------------------------------------------------------------------------
+  // Stable callbacks — wrapped in useCallback so TreeCanvas handlers don't
+  // change reference on every render (prevents spurious node-position resets)
+  // ---------------------------------------------------------------------------
+  const handleEditPerson = useCallback(
+    (person) => setPersonModal({ person }),
+    []
+  );
 
   // ---------------------------------------------------------------------------
   // Person CRUD
@@ -130,28 +233,40 @@ export default function TreeView() {
     setPeople(newPeople);
 
     // Auto-create relationship when coming from a contextual (+) button
-    let newRels       = relationships;
-    let newPositions  = nodePositions;
+    let newRels      = relationships;
+    let newPositions = nodePositions;
 
     if (pendingRelSource && newPerson && !personModal?.person) {
       const { sourcePersonId, relType, newNodePosition } = pendingRelSource;
 
-      // Set smart initial position for the new node
       if (newNodePosition) {
         newPositions = { ...nodePositions, [newPerson.id]: newNodePosition };
         setNodePositions(newPositions);
       }
 
       try {
-        // relType 'SPOUSE' → SPOUSE edge; 'PARENT' → source is PARENT of new child
         const relData = {
           fromPersonId: sourcePersonId,
           toPersonId:   newPerson.id,
           type:         relType === 'SPOUSE' ? 'SPOUSE' : 'PARENT',
+          isBiological: true,
         };
         const relRes = await createRelationship(id, relData);
         newRels = [...relationships, relRes.data];
         setRelationships(newRels);
+
+        // Case B: new spouse → check if source person has children and prompt
+        if (relType === 'SPOUSE') {
+          const partnerChildIds = new Set();
+          for (const r of newRels) {
+            if (r.type === 'PARENT' && r.fromPersonId === sourcePersonId) partnerChildIds.add(r.toPersonId);
+            if (r.type === 'CHILD'  && r.toPersonId   === sourcePersonId) partnerChildIds.add(r.fromPersonId);
+          }
+          if (partnerChildIds.size > 0) {
+            const partnerChildren = newPeople.filter((p) => partnerChildIds.has(p.id));
+            setSpouseChildPrompt({ newPerson, partnerChildren, sourcePersonId });
+          }
+        }
       } catch (err) {
         console.error('Auto-relationship creation failed:', err);
       }
@@ -180,7 +295,22 @@ export default function TreeView() {
   // Relationship CRUD
   // ---------------------------------------------------------------------------
   async function handleSaveRelationship(data) {
-    // Validate: no self-relationship, no duplicate
+    // UPDATE path — editing isBiological on an existing relationship
+    if (data.relId) {
+      try {
+        const res = await updateRelationship(id, data.relId, { isBiological: data.isBiological });
+        const newRels = relationships.map((r) =>
+          r.id === data.relId ? { ...r, ...res.data } : r
+        );
+        setRelationships(newRels);
+        pushHistory({ people, relationships: newRels, nodePositions });
+      } catch (err) {
+        console.error('Failed to update relationship:', err);
+      }
+      return;
+    }
+
+    // CREATE path
     if (data.fromPersonId === data.toPersonId) return;
     const isDuplicate = relationships.some(
       (r) =>
@@ -214,29 +344,57 @@ export default function TreeView() {
   // ---------------------------------------------------------------------------
   // Contextual (+) button handlers
   // ---------------------------------------------------------------------------
-  function handleAddSpouseOf(sourcePersonId) {
-    const sourcePos = nodePositions[sourcePersonId];
+  const handleAddSpouseOf = useCallback((sourcePersonId) => {
+    const sourcePos    = nodePositions[sourcePersonId];
     const newNodePosition = sourcePos
       ? { x: sourcePos.x + NODE_WIDTH + 120, y: sourcePos.y }
       : null;
     setPendingRelSource({ sourcePersonId, relType: 'SPOUSE', newNodePosition });
     setPersonModal({ person: null });
-  }
+  }, [nodePositions]);
 
-  function handleAddChildOf(sourcePersonId) {
-    const sourcePos = nodePositions[sourcePersonId];
+  const handleAddChildOf = useCallback((sourcePersonId) => {
+    const sourcePos    = nodePositions[sourcePersonId];
     const newNodePosition = sourcePos
       ? { x: sourcePos.x, y: sourcePos.y + NODE_HEIGHT + 140 }
       : null;
     setPendingRelSource({ sourcePersonId, relType: 'PARENT', newNodePosition });
     setPersonModal({ person: null });
+  }, [nodePositions]);
+
+  // ---------------------------------------------------------------------------
+  // Drag-to-connect handler — isBiological flows from TreeCanvas's BiologicalPrompt
+  // ---------------------------------------------------------------------------
+  async function handleConnectionComplete({ source, target, type, isBiological = true }) {
+    await handleSaveRelationship({ fromPersonId: source, toPersonId: target, type, isBiological });
   }
 
   // ---------------------------------------------------------------------------
-  // Drag-to-connect handler
+  // Spouse-children prompt resolution
   // ---------------------------------------------------------------------------
-  async function handleConnectionComplete({ source, target, type }) {
-    await handleSaveRelationship({ fromPersonId: source, toPersonId: target, type });
+  async function handleSpouseChildPromptComplete(choices) {
+    if (!spouseChildPrompt) return;
+    const { newPerson, partnerChildren, sourcePersonId } = spouseChildPrompt;
+    setSpouseChildPrompt(null);
+
+    let newRels = relationships;
+    for (const child of partnerChildren) {
+      const choice = choices[child.id];
+      if (choice === 'none') continue;
+      try {
+        const relRes = await createRelationship(id, {
+          fromPersonId: newPerson.id,
+          toPersonId:   child.id,
+          type:         'PARENT',
+          isBiological: choice === 'biological',
+        });
+        newRels = [...newRels, relRes.data];
+      } catch (err) {
+        console.error('Failed to create parent-child relationship:', err);
+      }
+    }
+    setRelationships(newRels);
+    pushHistory({ people, relationships: newRels, nodePositions });
   }
 
   const perspectivePerson = people.find((p) => p.id === perspectiveId);
@@ -363,7 +521,7 @@ export default function TreeView() {
               culture={tree?.culture}
               isReadOnly={false}
               onPerspectiveChange={setPerspectiveId}
-              onEditPerson={(person) => setPersonModal({ person })}
+              onEditPerson={handleEditPerson}
               onEdgeClick={handleEdgeClick}
               onAddSpouseOf={handleAddSpouseOf}
               onAddChildOf={handleAddChildOf}
@@ -401,7 +559,7 @@ export default function TreeView() {
           onDelete={personModal.person ? handleDeletePerson : undefined}
           onClose={() => {
             setPersonModal(null);
-            setPendingRelSource(null); // clear pending if user cancels
+            setPendingRelSource(null);
           }}
         />
       )}
@@ -412,6 +570,14 @@ export default function TreeView() {
           onSave={handleSaveRelationship}
           onDelete={handleDeleteRelationship}
           onClose={() => setRelModal(null)}
+        />
+      )}
+      {spouseChildPrompt && (
+        <SpouseChildrenPrompt
+          newPerson={spouseChildPrompt.newPerson}
+          children={spouseChildPrompt.partnerChildren}
+          onComplete={handleSpouseChildPromptComplete}
+          onSkip={() => setSpouseChildPrompt(null)}
         />
       )}
     </div>

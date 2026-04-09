@@ -31,7 +31,7 @@ router.get('/', requireAuth, async (req, res) => {
 
 // POST /api/trees/:treeId/relationships
 router.post('/', requireAuth, async (req, res) => {
-  const { fromPersonId, toPersonId, type } = req.body;
+  const { fromPersonId, toPersonId, type, isBiological = true } = req.body;
   if (!fromPersonId || !toPersonId || !type) {
     return res.status(400).json({ error: 'fromPersonId, toPersonId, and type are required' });
   }
@@ -59,6 +59,7 @@ router.post('/', requireAuth, async (req, res) => {
         fromPersonId,
         toPersonId,
         type,
+        isBiological: (type === 'PARENT' || type === 'CHILD') ? Boolean(isBiological) : true,
       },
     });
     res.status(201).json(rel);
@@ -71,10 +72,12 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
-// PUT /api/trees/:treeId/relationships/:id — update the type
+// PUT /api/trees/:treeId/relationships/:id — update type and/or isBiological
 router.put('/:id', requireAuth, async (req, res) => {
-  const { type } = req.body;
-  if (!type) return res.status(400).json({ error: 'type is required' });
+  const { type, isBiological } = req.body;
+  if (type === undefined && isBiological === undefined) {
+    return res.status(400).json({ error: 'type or isBiological is required' });
+  }
 
   try {
     if (!(await verifyTreeOwner(req, res))) return;
@@ -85,7 +88,10 @@ router.put('/:id', requireAuth, async (req, res) => {
 
     const updated = await prisma.relationship.update({
       where: { id: req.params.id },
-      data: { type },
+      data: {
+        ...(type !== undefined && { type }),
+        ...(isBiological !== undefined && { isBiological: Boolean(isBiological) }),
+      },
     });
     res.json(updated);
   } catch (err) {

@@ -43,10 +43,16 @@ function PersonNode({ data, selected }) {
       title={isReadOnly ? person.name : 'Click to set perspective · Double-click to edit'}
     >
       {/* React Flow connection handles */}
-      <Handle type="target" position={Position.Top}    className="!bg-veru-mid !w-2 !h-2 !border-0" />
-      <Handle type="source" position={Position.Bottom} className="!bg-veru-mid !w-2 !h-2 !border-0" id="bottom" />
-      <Handle type="target" position={Position.Left}   className="!bg-veru-mid !w-2 !h-2 !border-0" />
-      <Handle type="source" position={Position.Right}  className="!bg-veru-mid !w-2 !h-2 !border-0" id="right" />
+      {/* top — target only (receives parent→child edges; not draggable from) */}
+      <Handle type="target" position={Position.Top}    id="top"    className="!bg-veru-mid !w-2 !h-2 !border-0" />
+      {/* bottom — source for child edges */}
+      <Handle type="source" position={Position.Bottom} id="bottom" className="!bg-veru-mid !w-2 !h-2 !border-0" />
+      {/* left — source + target for spouse edges */}
+      <Handle type="source" position={Position.Left}   id="left"   className="!bg-veru-mid !w-2 !h-2 !border-0" />
+      <Handle type="target" position={Position.Left}   id="left"   className="!bg-veru-mid !w-2 !h-2 !border-0" />
+      {/* right — source + target for spouse edges */}
+      <Handle type="source" position={Position.Right}  id="right"  className="!bg-veru-mid !w-2 !h-2 !border-0" />
+      <Handle type="target" position={Position.Right}  id="right"  className="!bg-veru-mid !w-2 !h-2 !border-0" />
 
       {/* Perspective badge */}
       {isPerspective && (

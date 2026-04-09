@@ -45,6 +45,10 @@ export const updateRelationship = (treeId, relId, data) =>
 export const deleteRelationship = (treeId, relId) =>
   api.delete(`/trees/${treeId}/relationships/${relId}`);
 
+// Node positions
+export const patchNodePositions = (treeId, positions) =>
+  api.patch(`/trees/${treeId}/node-positions`, { positions });
+
 // Shared (public) tree
 export const getSharedTree = (token) => api.get(`/share/${token}`);
 export const getSharedKinship = (token, perspectiveId) =>

@@ -23,12 +23,13 @@ enum Culture {
 }
 
 model FamilyTree {
-  id        String         @id @default(uuid())
-  name      String
-  ownerId   String
-  owner     User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  culture   Culture        @default(ENGLISH)
-  createdAt DateTime       @default(now())
+  id                String         @id @default(uuid())
+  name              String
+  ownerId           String
+  owner             User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  culture           Culture        @default(ENGLISH)
+  createdAt         DateTime       @default(now())
+  nodePositionsJson Json?          @default("{}")
 
   people        Person[]
   relationships Relationship[]
@@ -80,6 +81,7 @@ model Relationship {
   toPersonId   String
   toPerson     Person           @relation("ToPerson", fields: [toPersonId], references: [id], onDelete: Cascade)
   type         RelationshipType
+  isBiological Boolean          @default(true)
 
   @@unique([fromPersonId, toPersonId, type])
 }

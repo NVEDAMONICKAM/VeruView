@@ -23,8 +23,8 @@ const TAMIL_TITLES = {
   mother:  { script: 'அம்மா',    transliteration: 'Ammā',    english: 'Mother' },
   parent:  { script: 'பெற்றோர்', transliteration: 'Peṯṯōr',  english: 'Parent' },
 
-  stepFather: { script: 'வளர்ப்பு அப்பா', transliteration: 'Valarpu Appā', english: 'Step-Father' },
-  stepMother: { script: 'வளர்ப்பு அம்மா', transliteration: 'Valarpu Ammā', english: 'Step-Mother' },
+  stepFather: { script: 'மாற்றானப்பன்', transliteration: 'Māṟṟāṉappaṉ', english: 'Step-Father' },
+  stepMother: { script: 'மாற்றாந்தாய்', transliteration: 'Māṟṟāntāy',   english: 'Step-Mother' },
 
   olderBrother:   { script: 'அண்ணன்',  transliteration: 'Aṇṇan',     english: 'Older Brother' },
   youngerBrother: { script: 'தம்பி',    transliteration: 'Tambi',     english: 'Younger Brother' },
@@ -110,20 +110,26 @@ export const CULTURE_TITLES = { TAMIL: TAMIL_TITLES, ENGLISH: ENGLISH_TITLES };
 // ---------------------------------------------------------------------------
 export function buildAdjacencyMap(people, relationships) {
   const map = {};
+  // biologicalMap: `${parentId}:${childId}` → boolean
+  // true = biological, false = step-parent (only meaningful for PARENT/CHILD edges)
+  const biologicalMap = {};
+
   for (const p of people) {
     map[p.id] = { parents: [], children: [], spouses: [] };
   }
   for (const rel of relationships) {
-    const { fromPersonId: f, toPersonId: t, type } = rel;
+    const { fromPersonId: f, toPersonId: t, type, isBiological = true } = rel;
     if (!map[f] || !map[t]) continue;
     switch (type) {
       case 'PARENT':
         if (!map[f].children.includes(t)) map[f].children.push(t);
         if (!map[t].parents.includes(f))  map[t].parents.push(f);
+        biologicalMap[`${f}:${t}`] = isBiological; // parent:child
         break;
       case 'CHILD':
         if (!map[f].parents.includes(t))  map[f].parents.push(t);
         if (!map[t].children.includes(f)) map[t].children.push(f);
+        biologicalMap[`${t}:${f}`] = isBiological; // parent:child
         break;
       case 'SPOUSE':
         if (!map[f].spouses.includes(t)) map[f].spouses.push(t);
@@ -131,13 +137,14 @@ export function buildAdjacencyMap(people, relationships) {
         break;
     }
   }
-  return map;
+  return { map, biologicalMap };
 }
 
 // ---------------------------------------------------------------------------
 // BFS — returns Map<personId, { pathTypes: string[], path: string[] }>
 // path[0] = perspectiveId, path[last] = that person
 // pathTypes[i] = relationship type from path[i] to path[i+1]
+// adjacency here is the `map` object from buildAdjacencyMap (not the full {map,biologicalMap})
 // ---------------------------------------------------------------------------
 const MAX_HOPS = 5;
 
@@ -173,16 +180,27 @@ export function findShortestPaths(perspectiveId, adjacency) {
 // ---------------------------------------------------------------------------
 // Pattern-match pathTypes → title key
 // ---------------------------------------------------------------------------
-export function deriveTitleKey(pathTypes, path, targetPerson, perspectivePerson, peopleMap) {
+// biologicalMap: `${parentId}:${childId}` → boolean (true = biological)
+// path[0] = perspectiveId, so for a `parent` hop: parentId=path[1], childId=path[0]
+// For a `child` hop: parentId=path[0], childId=path[1]
+export function deriveTitleKey(pathTypes, path, targetPerson, perspectivePerson, peopleMap, biologicalMap = {}) {
   const pattern = pathTypes.join(',');
   const gender  = targetPerson?.gender;
 
   switch (pattern) {
     // ── 1 hop ─────────────────────────────────────────────────────────────────
-    case 'parent':
+    case 'parent': {
+      // path = [perspectiveId, parentId]
+      const isBio = biologicalMap[`${path[1]}:${path[0]}`] !== false;
+      if (!isBio) return gender === 'MALE' ? 'stepFather' : gender === 'FEMALE' ? 'stepMother' : 'relative';
       return gender === 'MALE' ? 'father' : gender === 'FEMALE' ? 'mother' : 'parent';
-    case 'child':
+    }
+    case 'child': {
+      // path = [perspectiveId, childId]
+      const isBio = biologicalMap[`${path[0]}:${path[1]}`] !== false;
+      if (!isBio) return gender === 'MALE' ? 'stepSon' : gender === 'FEMALE' ? 'stepDaughter' : 'relative';
       return gender === 'MALE' ? 'son' : gender === 'FEMALE' ? 'daughter' : 'child';
+    }
     case 'spouse':
       return gender === 'MALE' ? 'husband' : gender === 'FEMALE' ? 'wife' : 'spouse';
 
@@ -192,7 +210,9 @@ export function deriveTitleKey(pathTypes, path, targetPerson, perspectivePerson,
       return grandparentKey(parent, targetPerson);
     }
     case 'parent,spouse':
-      return gender === 'MALE' ? 'stepFather' : gender === 'FEMALE' ? 'stepMother' : 'relative';
+      // Parent's spouse with no direct parent relationship to perspective → relative
+      // (step-parent status is only assigned via explicit isBiological=false on a PARENT edge)
+      return 'relative';
     case 'parent,child':
       return siblingKey(perspectivePerson, targetPerson);
     case 'child,child':
@@ -202,7 +222,9 @@ export function deriveTitleKey(pathTypes, path, targetPerson, perspectivePerson,
     case 'spouse,parent':
       return gender === 'MALE' ? 'fatherInLaw' : gender === 'FEMALE' ? 'motherInLaw' : 'relative';
     case 'spouse,child':
-      return gender === 'MALE' ? 'stepSon' : gender === 'FEMALE' ? 'stepDaughter' : 'relative';
+      // Spouse's child with no direct PARENT relationship to perspective → relative
+      // (if a PARENT/CHILD edge with isBiological=false exists, the 1-hop `child` path wins)
+      return 'relative';
 
     // ── 3 hops ────────────────────────────────────────────────────────────────
     case 'parent,parent,parent':
@@ -338,7 +360,7 @@ function uncleAuntSpouseKey(parent, uncleAunt) {
 export function computeAllKinshipTitles(perspectiveId, people, relationships, culture) {
   const titleMap    = CULTURE_TITLES[culture] ?? ENGLISH_TITLES;
   const peopleMap   = new Map(people.map((p) => [p.id, p]));
-  const adjacency   = buildAdjacencyMap(people, relationships);
+  const { map: adjacency, biologicalMap } = buildAdjacencyMap(people, relationships);
   const perspective = peopleMap.get(perspectiveId);
 
   if (!perspective) return {};
@@ -359,7 +381,7 @@ export function computeAllKinshipTitles(perspectiveId, people, relationships, cu
     }
 
     const { pathTypes, path } = pathData;
-    const titleKey = deriveTitleKey(pathTypes, path, person, perspective, peopleMap);
+    const titleKey = deriveTitleKey(pathTypes, path, person, perspective, peopleMap, biologicalMap);
 
     if (!titleKey) {
       const title = titleMap['relative'] ?? null;

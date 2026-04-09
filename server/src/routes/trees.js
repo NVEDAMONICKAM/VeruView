@@ -146,6 +146,29 @@ router.get('/:id/kinship/:perspectiveId', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/trees/:id/node-positions — persist canvas node positions
+router.patch('/:id/node-positions', requireAuth, async (req, res) => {
+  const { positions } = req.body;
+  if (!positions || typeof positions !== 'object' || Array.isArray(positions)) {
+    return res.status(400).json({ error: 'positions must be an object' });
+  }
+  try {
+    const tree = await prisma.familyTree.findFirst({
+      where: { id: req.params.id, ownerId: req.user.id },
+    });
+    if (!tree) return res.status(404).json({ error: 'Tree not found' });
+
+    await prisma.familyTree.update({
+      where: { id: req.params.id },
+      data: { nodePositionsJson: positions },
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // PUT /api/trees/:id/title-overrides — upsert a title override
 router.put('/:id/title-overrides', requireAuth, async (req, res) => {
   const { relationshipKey, culture, script, transliteration, english } = req.body;
