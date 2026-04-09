@@ -24,11 +24,7 @@ const EDGE_CONFIG = {
   SPOUSE: { color: '#5BA8A0', label: 'Spouse' },
 };
 
-const CONN_TYPES = [
-  { type: 'PARENT', label: '"From" is Parent of "To"' },
-  { type: 'CHILD',  label: '"From" is Child of "To"' },
-  { type: 'SPOUSE', label: 'Spouses / Partners' },
-];
+// Connection types — labels are dynamically built using person names in ConnectionTypePopup
 
 // ---------------------------------------------------------------------------
 // Dagre layout — only assigns positions for nodes NOT in externalPositions
@@ -239,26 +235,27 @@ function AutoOrganisePanel({ nodes, edges, onSetNodes, onPositionsChange }) {
 }
 
 // ---------------------------------------------------------------------------
-// Connection type popup — shown after drag-to-connect
+// Connection type popup — shown after drag-to-connect, uses real person names
 // ---------------------------------------------------------------------------
 function ConnectionTypePopup({ connection, people, onConfirm, onCancel }) {
   const peopleMap = Object.fromEntries(people.map((p) => [p.id, p]));
-  const fromName  = peopleMap[connection.source]?.name ?? connection.source;
-  const toName    = peopleMap[connection.target]?.name ?? connection.target;
+  const A = peopleMap[connection.source]?.name ?? 'Person A';
+  const B = peopleMap[connection.target]?.name ?? 'Person B';
+
+  const options = [
+    { type: 'PARENT', label: `${A} is parent of ${B}` },
+    { type: 'CHILD',  label: `${B} is parent of ${A}` },
+    { type: 'SPOUSE', label: `${A} and ${B} are partners` },
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm p-4">
       <div className="bg-earth-warmWhite rounded-2xl shadow-2xl w-full max-w-xs p-5 space-y-3">
         <p className="text-sm font-semibold text-veru-dark text-center" style={{ fontFamily: 'Georgia, serif' }}>
-          Add relationship
-        </p>
-        <p className="text-xs text-gray-400 text-center">
-          <span className="font-medium text-gray-700">{fromName}</span>
-          {' → '}
-          <span className="font-medium text-gray-700">{toName}</span>
+          Connect {A} and {B}
         </p>
         <div className="space-y-2 pt-1">
-          {CONN_TYPES.map(({ type, label }) => (
+          {options.map(({ type, label }) => (
             <button
               key={type}
               onClick={() => onConfirm(type)}
@@ -352,11 +349,13 @@ export default function TreeCanvas({
   // pendingBioConnection holds a confirmed type (PARENT/CHILD) waiting for biological choice
   const [pendingBioConnection, setPendingBioConnection] = useState(null);
 
-  // Ref so layout effect can read latest positions without re-triggering on drag
-  const externalPositionsRef = useRef(externalPositions);
-  externalPositionsRef.current = externalPositions;
+  // Local position ref — the definitive source of truth for node positions.
+  // Updated SYNCHRONOUSLY on drag stop (before any React re-render), so if a
+  // rebuild effect fires afterwards it always reads the post-drag positions.
+  // Also synced from externalPositions on initial load and undo/redo.
+  const localPositionsRef = useRef({});
 
-  // First-layout flag — once set, externalPositions seeds all future layouts
+  // First-layout flag — fires onPositionsChange once to seed TreeView state
   const firstLayoutRef = useRef(true);
 
   const handlers = useMemo(
@@ -369,42 +368,50 @@ export default function TreeCanvas({
     [onPerspectiveChange, onEditPerson, onAddSpouseOf, onAddChildOf]
   );
 
-  // ── Full rebuild when data changes ─────────────────────────────────────────
-  useEffect(() => {
-    if (people.length === 0) {
-      // Tree cleared (navigation) — reset first-layout flag
-      firstLayoutRef.current = true;
-      setNodes([]);
-      setEdges([]);
-      return;
-    }
-
-    const { nodes: rawNodes, edges: rawEdges } = buildFlowElements(
-      people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers, externalPositionsRef.current
-    );
-    const laidOut = computeLayout(rawNodes, rawEdges, externalPositionsRef.current);
-    setNodes(laidOut);
-    setEdges(rawEdges);
-
-    // On first render with data, publish all positions so TreeView saves them.
-    // After this, externalPositions covers every node → dagre won't reorder them.
-    if (firstLayoutRef.current) {
-      firstLayoutRef.current = false;
-      const posMap = {};
-      laidOut.forEach((n) => { posMap[n.id] = n.position; });
-      onPositionsChange?.(posMap);
-    }
-  }, [people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers]);
-
-  // Apply undo/redo positions without full dagre re-run
+  // ── Sync local position ref from external (initial load, undo/redo) ─────────
+  // externalPositions comes from TreeView state (loaded from DB or history snapshot).
+  // We merge it into our local ref so the rebuild effect always has up-to-date positions,
+  // then apply it to rendered nodes immediately.
   useEffect(() => {
     if (Object.keys(externalPositions).length === 0) return;
+    localPositionsRef.current = { ...localPositionsRef.current, ...externalPositions };
     setNodes((prev) =>
       prev.map((n) =>
         externalPositions[n.id] ? { ...n, position: externalPositions[n.id] } : n
       )
     );
   }, [externalPositions]);
+
+  // ── Full rebuild when people/relationships/display data changes ────────────
+  // Uses localPositionsRef (not externalPositions) so the positions read here
+  // are always current — even if this effect fires immediately after a drag
+  // (where externalPositions hasn't propagated back yet but localPositionsRef
+  // was already updated synchronously in handleNodeDragStop).
+  useEffect(() => {
+    if (people.length === 0) {
+      firstLayoutRef.current = true;
+      localPositionsRef.current = {};
+      setNodes([]);
+      setEdges([]);
+      return;
+    }
+
+    const { nodes: rawNodes, edges: rawEdges } = buildFlowElements(
+      people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers, localPositionsRef.current
+    );
+    const laidOut = computeLayout(rawNodes, rawEdges, localPositionsRef.current);
+    setNodes(laidOut);
+    setEdges(rawEdges);
+
+    // On first layout with data, publish all positions so TreeView can persist them.
+    if (firstLayoutRef.current) {
+      firstLayoutRef.current = false;
+      const posMap = {};
+      laidOut.forEach((n) => { posMap[n.id] = n.position; });
+      localPositionsRef.current = posMap;
+      onPositionsChange?.(posMap);
+    }
+  }, [people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers]);
 
   // ── Edge hover label ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -473,12 +480,16 @@ export default function TreeCanvas({
     [pendingBioConnection, onConnectionComplete]
   );
 
-  // ── Drag-stop: save all positions ─────────────────────────────────────────
+  // ── Drag-stop: update local ref IMMEDIATELY then propagate ────────────────
+  // Updating localPositionsRef.current synchronously (before any React re-render)
+  // means that if a rebuild useEffect fires right after (because callback prop
+  // references changed), it reads the post-drag positions — no snap-back.
   const handleNodeDragStop = useCallback(
     (_evt, _node, allNodes) => {
       const posMap = {};
       allNodes.forEach((n) => { posMap[n.id] = n.position; });
-      onPositionsChange?.(posMap);
+      localPositionsRef.current = posMap;   // synchronous — always current
+      onPositionsChange?.(posMap);          // async — propagates to TreeView state
     },
     [onPositionsChange]
   );
@@ -535,7 +546,20 @@ export default function TreeCanvas({
         )}
 
         <Panel position="bottom-left">
-          <EdgeLegend />
+          <div className="flex flex-col gap-2 items-start">
+            {/* "Viewing as" pill — floats above legend, never overlaps nodes */}
+            {perspectiveId && (() => {
+              const perspName = people.find((p) => p.id === perspectiveId)?.name;
+              return perspName ? (
+                <div className="flex items-center gap-1.5 text-xs bg-[#D4EDDA] text-[#3A7D5C] border border-[#A8D5B5] rounded-full px-3 py-1 shadow-sm"
+                  style={{ fontFamily: 'Inter, sans-serif' }}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#3A7D5C] inline-block flex-shrink-0" />
+                  Viewing as <span className="font-semibold ml-0.5">{perspName}</span>
+                </div>
+              ) : null;
+            })()}
+            <EdgeLegend />
+          </div>
         </Panel>
 
         <MiniMap

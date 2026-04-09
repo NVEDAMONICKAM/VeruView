@@ -50,10 +50,20 @@ function TreeCard({ tree, onDelete }) {
       <button
         onClick={handleDelete}
         disabled={deleting}
-        className="absolute bottom-4 right-4 text-gray-300 hover:text-red-400 transition-colors text-sm opacity-0 group-hover:opacity-100"
+        className="absolute bottom-4 right-4 flex items-center justify-center w-9 h-9 rounded-full text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
         title="Delete tree"
       >
-        {deleting ? '…' : '🗑'}
+        {deleting ? (
+          <span className="text-xs">…</span>
+        ) : (
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="5 7 5 17 15 17 15 7"/>
+            <line x1="3" y1="7" x2="17" y2="7"/>
+            <line x1="8" y1="7" x2="8" y2="4"/>
+            <line x1="12" y1="7" x2="12" y2="4"/>
+            <line x1="8" y1="4" x2="12" y2="4"/>
+          </svg>
+        )}
       </button>
     </Link>
   );
