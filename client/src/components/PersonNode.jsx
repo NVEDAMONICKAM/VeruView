@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo } from 'react';
 import { Handle, Position } from 'reactflow';
 import InitialsAvatar from './InitialsAvatar';
 
@@ -22,27 +22,28 @@ function PersonNode({ data, selected }) {
     onClickNode, onEditNode, onAddSpouse, onAddChild,
   } = data;
 
-  const [isHovered, setIsHovered] = useState(false);
   const title    = kinship?.title ?? null;
   const showTamil = culture === 'TAMIL' && title?.script;
 
   return (
     <div
       className={`
-        relative group bg-earth-warmWhite rounded-2xl shadow-md border-2 transition-all cursor-pointer
+        relative group bg-earth-warmWhite rounded-2xl shadow-md transition-all cursor-pointer
         w-44 select-none min-h-[44px]
         ${isPerspective
-          ? 'border-veru-accent shadow-veru-accent/30 shadow-lg scale-105'
+          ? 'scale-105'
           : person.gender === 'FEMALE'
-            ? 'border-earth-rose hover:border-veru-accent hover:shadow-lg'
-            : 'border-veru-mid hover:border-veru-accent hover:shadow-lg'
+            ? 'border-2 border-earth-rose hover:border-veru-accent hover:shadow-lg'
+            : 'border-2 border-veru-mid hover:border-veru-accent hover:shadow-lg'
         }
         ${selected ? 'ring-2 ring-veru-dark ring-offset-1' : ''}
       `}
+      style={isPerspective
+        ? { border: '2.5px solid #F5D76E', boxShadow: '0 0 0 3px rgba(245,215,110,0.25)', boxSizing: 'border-box' }
+        : { boxSizing: 'border-box' }
+      }
       onClick={() => onClickNode?.(person.id)}
       onDoubleClick={() => !isReadOnly && onEditNode?.(person)}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
       title={isReadOnly ? person.name : 'Click to set perspective · Double-click to edit'}
     >
       {/* React Flow connection handles */}
@@ -57,12 +58,6 @@ function PersonNode({ data, selected }) {
       <Handle type="source" position={Position.Right}  id="right"  className="!bg-veru-mid !w-2 !h-2 !border-0" />
       <Handle type="target" position={Position.Right}  id="right"  className="!bg-veru-mid !w-2 !h-2 !border-0" />
 
-      {/* Perspective badge — hidden on hover so top handle is accessible */}
-      {isPerspective && !isHovered && (
-        <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-veru-accent text-white text-[9px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap z-[5]">
-          Viewing as
-        </div>
-      )}
 
       {/* Edit button (hover, desktop only) */}
       {!isReadOnly && (

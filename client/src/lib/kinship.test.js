@@ -217,6 +217,128 @@ describe('computeAllKinshipTitles', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Uncle / aunt SPOUSE titles — the main bug this rewrite fixes.
+//
+// Tree:
+//   GPF ─── GPM   (paternal grandparents)
+//   MGF ─── MGM   (maternal grandparents)
+//       |               |
+//       F ─────────── M     (parents of Persp)
+//       |
+//     Persp (MALE, 1990)
+//
+// Paternal uncles/aunts:
+//   FOB (MALE 1955, father's OLDER brother) married to FOB_W (FEMALE)
+//   FYB (MALE 1963, father's YOUNGER brother) married to FYB_W (FEMALE)
+//   FS  (FEMALE 1958, father's sister) married to FS_H (MALE)
+//
+// Maternal uncles/aunts:
+//   MB  (MALE 1958, mother's brother) married to MB_W (FEMALE) → THE main bug case
+//   MOS (FEMALE 1960, mother's OLDER sister) married to MOS_H (MALE)
+//   MYS (FEMALE 1967, mother's YOUNGER sister) married to MYS_H (MALE)
+// ---------------------------------------------------------------------------
+describe('uncle/aunt spouse titles', () => {
+  const peop = [
+    p('persp', 'Persp', 'MALE',   '1990-01-01'),
+    p('f',     'Father','MALE',   '1960-05-10'),
+    p('m',     'Mother','FEMALE', '1963-07-20'),
+    p('gpf',   'GPF',   'MALE',   '1930-01-01'),
+    p('gpm',   'GPM',   'FEMALE', '1932-01-01'),
+    p('mgf',   'MGF',   'MALE',   '1928-01-01'),
+    p('mgm',   'MGM',   'FEMALE', '1930-01-01'),
+    // Paternal side uncles/aunts + spouses
+    p('fob',   'FOB',   'MALE',   '1955-01-01'), // father's OLDER brother
+    p('fob_w', 'FOB_W', 'FEMALE', '1957-01-01'),
+    p('fyb',   'FYB',   'MALE',   '1963-01-01'), // father's YOUNGER brother
+    p('fyb_w', 'FYB_W', 'FEMALE', '1965-01-01'),
+    p('fs',    'FS',    'FEMALE', '1958-01-01'), // father's sister
+    p('fs_h',  'FS_H',  'MALE',   '1955-01-01'),
+    // Maternal side uncles/aunts + spouses
+    p('mb',    'MB',    'MALE',   '1958-01-01'), // mother's brother
+    p('mb_w',  'MB_W',  'FEMALE', '1960-01-01'), // ← main bug: should be mothersBrotherWife
+    p('mos',   'MOS',   'FEMALE', '1960-01-01'), // mother's OLDER sister
+    p('mos_h', 'MOS_H', 'MALE',   '1958-01-01'),
+    p('mys',   'MYS',   'FEMALE', '1967-01-01'), // mother's YOUNGER sister
+    p('mys_h', 'MYS_H', 'MALE',   '1965-01-01'),
+  ];
+
+  const rels2 = [
+    // Grandparents
+    rel('a1', 'gpf', 'f',   'PARENT'),
+    rel('a2', 'gpm', 'f',   'PARENT'),
+    rel('a3', 'gpf', 'gpm', 'SPOUSE'),
+    rel('a4', 'mgf', 'm',   'PARENT'),
+    rel('a5', 'mgm', 'm',   'PARENT'),
+    rel('a6', 'mgf', 'mgm', 'SPOUSE'),
+    // Parents
+    rel('a7', 'f',   'persp','PARENT'),
+    rel('a8', 'm',   'persp','PARENT'),
+    rel('a9', 'f',   'm',    'SPOUSE'),
+    // Paternal uncles/aunts (children of gpf/gpm)
+    rel('a10','gpf', 'fob',  'PARENT'),
+    rel('a11','gpm', 'fob',  'PARENT'),
+    rel('a12','fob', 'fob_w','SPOUSE'),
+    rel('a13','gpf', 'fyb',  'PARENT'),
+    rel('a14','gpm', 'fyb',  'PARENT'),
+    rel('a15','fyb', 'fyb_w','SPOUSE'),
+    rel('a16','gpf', 'fs',   'PARENT'),
+    rel('a17','gpm', 'fs',   'PARENT'),
+    rel('a18','fs',  'fs_h', 'SPOUSE'),
+    // Maternal uncles/aunts (children of mgf/mgm)
+    rel('a19','mgf', 'mb',   'PARENT'),
+    rel('a20','mgm', 'mb',   'PARENT'),
+    rel('a21','mb',  'mb_w', 'SPOUSE'),
+    rel('a22','mgf', 'mos',  'PARENT'),
+    rel('a23','mgm', 'mos',  'PARENT'),
+    rel('a24','mos', 'mos_h','SPOUSE'),
+    rel('a25','mgf', 'mys',  'PARENT'),
+    rel('a26','mgm', 'mys',  'PARENT'),
+    rel('a27','mys', 'mys_h','SPOUSE'),
+  ];
+
+  const r = computeAllKinshipTitles('persp', peop, rels2, 'ENGLISH');
+  const rTamil = computeAllKinshipTitles('persp', peop, rels2, 'TAMIL');
+
+  // Sanity: uncle/aunt themselves still correct
+  it('uncle/aunt: FOB is fathersOlderBrother', () => expect(key(r,'fob')).toBe('fathersOlderBrother'));
+  it('uncle/aunt: FYB is fathersYoungerBrother', () => expect(key(r,'fyb')).toBe('fathersYoungerBrother'));
+  it('uncle/aunt: FS is fathersSister', () => expect(key(r,'fs')).toBe('fathersSister'));
+  it('uncle/aunt: MB is mothersBrother', () => expect(key(r,'mb')).toBe('mothersBrother'));
+  it('uncle/aunt: MOS is mothersOlderSister', () => expect(key(r,'mos')).toBe('mothersOlderSister'));
+  it('uncle/aunt: MYS is mothersYoungerSister', () => expect(key(r,'mys')).toBe('mothersYoungerSister'));
+
+  // Uncle/aunt spouses — the main fix
+  it('MB_W (mother\'s brother\'s wife) → mothersBrotherWife', () =>
+    expect(key(r,'mb_w')).toBe('mothersBrotherWife'));
+  it('FOB_W (father\'s older brother\'s wife) → fathersOlderBrotherWife', () =>
+    expect(key(r,'fob_w')).toBe('fathersOlderBrotherWife'));
+  it('FYB_W (father\'s younger brother\'s wife) → fathersYoungerBrotherWife', () =>
+    expect(key(r,'fyb_w')).toBe('fathersYoungerBrotherWife'));
+  it('FS_H (father\'s sister\'s husband) → fathersSisterHusband', () =>
+    expect(key(r,'fs_h')).toBe('fathersSisterHusband'));
+  it('MOS_H (mother\'s older sister\'s husband) → mothersOlderSisterHusband', () =>
+    expect(key(r,'mos_h')).toBe('mothersOlderSisterHusband'));
+  it('MYS_H (mother\'s younger sister\'s husband) → mothersYoungerSisterHusband', () =>
+    expect(key(r,'mys_h')).toBe('mothersYoungerSisterHusband'));
+
+  // Tamil script correctness
+  it('Tamil: mothersOlderSister script is பெரியம்மா (not அத்தை)', () =>
+    expect(rTamil['mos']?.title?.script).toBe('பெரியம்மா'));
+  it('Tamil: mothersBrotherWife script is மாமி', () =>
+    expect(rTamil['mb_w']?.title?.script).toBe('மாமி'));
+  it('Tamil: fathersOlderBrotherWife script is பெரியம்மா', () =>
+    expect(rTamil['fob_w']?.title?.script).toBe('பெரியம்மா'));
+  it('Tamil: fathersYoungerBrotherWife script is சித்தி', () =>
+    expect(rTamil['fyb_w']?.title?.script).toBe('சித்தி'));
+  it('Tamil: fathersSisterHusband script is மாமா', () =>
+    expect(rTamil['fs_h']?.title?.script).toBe('மாமா'));
+  it('Tamil: mothersOlderSisterHusband script is பெரியப்பா', () =>
+    expect(rTamil['mos_h']?.title?.script).toBe('பெரியப்பா'));
+  it('Tamil: mothersYoungerSisterHusband script is சித்தப்பா', () =>
+    expect(rTamil['mys_h']?.title?.script).toBe('சித்தப்பா'));
+});
+
+// ---------------------------------------------------------------------------
 // 4-person minimal family — focuses on step-parent and BUG-C (step-sibling
 // detection via parent-spouse chain)
 //

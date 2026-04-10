@@ -99,7 +99,9 @@ export default function TreeView() {
   const [people,        setPeople]        = useState([]);
   const [relationships, setRelationships] = useState([]);
   const [perspectiveId, setPerspectiveId] = useState(null);
-  const [nodePositions, setNodePositions] = useState({});
+  // Positions live in a ref — never in state. State updates on drag would
+  // trigger re-renders → handler reference changes → layout re-runs → snap-back.
+  const positionsRef = useRef({});
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState('');
   const [drawerOpen,    setDrawerOpen]    = useState(false);
@@ -131,21 +133,22 @@ export default function TreeView() {
   // ---------------------------------------------------------------------------
   useEffect(() => {
     setLoading(true);
-    setNodePositions({});
+    positionsRef.current = {};
     getTree(id)
       .then((res) => {
         const t = res.data;
         setTree(t);
         const loadedPeople = Array.isArray(t.people)        ? t.people        : [];
         const loadedRels   = Array.isArray(t.relationships) ? t.relationships : [];
-        // Load persisted positions from backend
+        // Load persisted positions into ref BEFORE triggering re-renders, so
+        // TreeCanvas's main useEffect reads them on its first run.
         const loadedPositions =
           t.nodePositionsJson && typeof t.nodePositionsJson === 'object' && !Array.isArray(t.nodePositionsJson)
             ? t.nodePositionsJson
             : {};
+        positionsRef.current = loadedPositions;
         setPeople(loadedPeople);
         setRelationships(loadedRels);
-        setNodePositions(loadedPositions);
         if (loadedPeople.length > 0) setPerspectiveId(loadedPeople[0].id);
         resetHistory({ people: loadedPeople, relationships: loadedRels, nodePositions: loadedPositions });
       })
@@ -162,17 +165,18 @@ export default function TreeView() {
   function handleUndo() {
     const snap = undo();
     if (!snap) return;
+    // Update ref BEFORE state so TreeCanvas's useEffect reads restored positions
+    positionsRef.current = { ...(snap.nodePositions || {}) };
     setPeople(snap.people);
     setRelationships(snap.relationships);
-    setNodePositions(snap.nodePositions || {});
   }
 
   function handleRedo() {
     const snap = redo();
     if (!snap) return;
+    positionsRef.current = { ...(snap.nodePositions || {}) };
     setPeople(snap.people);
     setRelationships(snap.relationships);
-    setNodePositions(snap.nodePositions || {});
   }
 
   // ---------------------------------------------------------------------------
@@ -191,10 +195,11 @@ export default function TreeView() {
   }, [canUndo, canRedo]);
 
   // ---------------------------------------------------------------------------
-  // Node position tracking — persists to backend after drag
+  // Node position save — called by TreeCanvas after drag or auto-organise.
+  // Does NOT update state (no re-render, no snap-back chain).
+  // positionsRef.current is already updated by TreeCanvas before this fires.
   // ---------------------------------------------------------------------------
   const handlePositionsChange = useCallback((posMap) => {
-    setNodePositions(posMap);
     clearTimeout(positionSaveTimer.current);
     positionSaveTimer.current = setTimeout(() => {
       patchNodePositions(id, posMap).catch((err) =>
@@ -233,15 +238,13 @@ export default function TreeView() {
     setPeople(newPeople);
 
     // Auto-create relationship when coming from a contextual (+) button
-    let newRels      = relationships;
-    let newPositions = nodePositions;
+    let newRels = relationships;
 
     if (pendingRelSource && newPerson && !personModal?.person) {
       const { sourcePersonId, relType, newNodePosition } = pendingRelSource;
 
       if (newNodePosition) {
-        newPositions = { ...nodePositions, [newPerson.id]: newNodePosition };
-        setNodePositions(newPositions);
+        positionsRef.current[newPerson.id] = newNodePosition;
       }
 
       try {
@@ -274,7 +277,7 @@ export default function TreeView() {
       setPendingRelSource(null);
     }
 
-    pushHistory({ people: newPeople, relationships: newRels, nodePositions: newPositions });
+    pushHistory({ people: newPeople, relationships: newRels, nodePositions: { ...positionsRef.current } });
   }
 
   async function handleDeletePerson() {
@@ -288,7 +291,7 @@ export default function TreeView() {
     setPeople(newPeople);
     setRelationships(newRels);
     if (perspectiveId === personId) setPerspectiveId(newPeople[0]?.id ?? null);
-    pushHistory({ people: newPeople, relationships: newRels, nodePositions });
+    pushHistory({ people: newPeople, relationships: newRels, nodePositions: { ...positionsRef.current } });
   }
 
   // ---------------------------------------------------------------------------
@@ -303,7 +306,7 @@ export default function TreeView() {
           r.id === data.relId ? { ...r, ...res.data } : r
         );
         setRelationships(newRels);
-        pushHistory({ people, relationships: newRels, nodePositions });
+        pushHistory({ people, relationships: newRels, nodePositions: { ...positionsRef.current } });
       } catch (err) {
         console.error('Failed to update relationship:', err);
       }
@@ -324,7 +327,7 @@ export default function TreeView() {
     const res     = await createRelationship(id, data);
     const newRels = [...relationships, res.data];
     setRelationships(newRels);
-    pushHistory({ people, relationships: newRels, nodePositions });
+    pushHistory({ people, relationships: newRels, nodePositions: { ...positionsRef.current } });
   }
 
   async function handleDeleteRelationship() {
@@ -333,7 +336,7 @@ export default function TreeView() {
     await deleteRelationship(id, relId);
     const newRels = relationships.filter((r) => r.id !== relId);
     setRelationships(newRels);
-    pushHistory({ people, relationships: newRels, nodePositions });
+    pushHistory({ people, relationships: newRels, nodePositions: { ...positionsRef.current } });
   }
 
   const handleEdgeClick = useCallback((edgeData) => {
@@ -344,23 +347,25 @@ export default function TreeView() {
   // ---------------------------------------------------------------------------
   // Contextual (+) button handlers
   // ---------------------------------------------------------------------------
+  // Stable callbacks — positionsRef is a ref (never changes identity), so
+  // these have empty deps and never cause TreeCanvas's handlers to re-create.
   const handleAddSpouseOf = useCallback((sourcePersonId) => {
-    const sourcePos    = nodePositions[sourcePersonId];
+    const sourcePos = positionsRef.current[sourcePersonId];
     const newNodePosition = sourcePos
       ? { x: sourcePos.x + NODE_WIDTH + 120, y: sourcePos.y }
       : null;
     setPendingRelSource({ sourcePersonId, relType: 'SPOUSE', newNodePosition });
     setPersonModal({ person: null });
-  }, [nodePositions]);
+  }, []);
 
   const handleAddChildOf = useCallback((sourcePersonId) => {
-    const sourcePos    = nodePositions[sourcePersonId];
+    const sourcePos = positionsRef.current[sourcePersonId];
     const newNodePosition = sourcePos
       ? { x: sourcePos.x, y: sourcePos.y + NODE_HEIGHT + 140 }
       : null;
     setPendingRelSource({ sourcePersonId, relType: 'PARENT', newNodePosition });
     setPersonModal({ person: null });
-  }, [nodePositions]);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Drag-to-connect handler — isBiological flows from TreeCanvas's BiologicalPrompt
@@ -394,7 +399,7 @@ export default function TreeView() {
       }
     }
     setRelationships(newRels);
-    pushHistory({ people, relationships: newRels, nodePositions });
+    pushHistory({ people, relationships: newRels, nodePositions: { ...positionsRef.current } });
   }
 
   const perspectivePerson = people.find((p) => p.id === perspectiveId);
@@ -526,7 +531,7 @@ export default function TreeView() {
               onAddSpouseOf={handleAddSpouseOf}
               onAddChildOf={handleAddChildOf}
               onConnectionComplete={handleConnectionComplete}
-              externalPositions={nodePositions}
+              positionsRef={positionsRef}
               onPositionsChange={handlePositionsChange}
               onUndo={handleUndo}
               onRedo={handleRedo}

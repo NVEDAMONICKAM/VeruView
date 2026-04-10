@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -24,12 +24,10 @@ const EDGE_CONFIG = {
   SPOUSE: { color: '#5BA8A0', label: 'Spouse' },
 };
 
-// Connection types — labels are dynamically built using person names in ConnectionTypePopup
-
 // ---------------------------------------------------------------------------
-// Dagre layout — only assigns positions for nodes NOT in externalPositions
+// Dagre layout — used ONLY by Auto-organise button
 // ---------------------------------------------------------------------------
-function computeLayout(rfNodes, rfEdges, externalPositions = {}) {
+function computeLayout(rfNodes, rfEdges) {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 100, marginx: 40, marginy: 40 });
@@ -42,9 +40,6 @@ function computeLayout(rfNodes, rfEdges, externalPositions = {}) {
   dagre.layout(g);
 
   return rfNodes.map((n) => {
-    if (externalPositions[n.id]) {
-      return { ...n, position: externalPositions[n.id] };
-    }
     const pos = g.node(n.id);
     return {
       ...n,
@@ -210,15 +205,17 @@ function UndoRedoButtons({ onUndo, onRedo, canUndo, canRedo }) {
 
 // ---------------------------------------------------------------------------
 // Auto-organise button — must be inside <ReactFlow> to access useReactFlow
+// Writes computed positions into the shared positionsRef so the next rebuild
+// reads them rather than re-running dagre reactively.
 // ---------------------------------------------------------------------------
-function AutoOrganisePanel({ nodes, edges, onSetNodes, onPositionsChange, onResetLayout }) {
+function AutoOrganisePanel({ nodes, edges, onSetNodes, positionsRef, onPositionsChange }) {
   const { fitView } = useReactFlow();
 
   function organise() {
-    onResetLayout?.();                      // clear manual flag + saved positions
-    const laidOut = computeLayout(nodes, edges, {});
+    const laidOut = computeLayout(nodes, edges);
     const posMap  = {};
     laidOut.forEach((n) => { posMap[n.id] = n.position; });
+    Object.assign(positionsRef.current, posMap);
     onSetNodes(laidOut);
     onPositionsChange?.(posMap);
     setTimeout(() => fitView({ padding: 0.2, duration: 400 }), 50);
@@ -339,29 +336,17 @@ export default function TreeCanvas({
   onRedo,
   canUndo = false,
   canRedo = false,
-  // Node position persistence
-  externalPositions = {},
+  // Shared position ref — the ONLY source of truth for node positions.
+  // positionsRef.current is read on every rebuild and written on every drag-stop.
+  // Because it's a ref (not state), writes never trigger re-renders.
+  positionsRef,
   onPositionsChange,
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [activeEdgeId,       setActiveEdgeId]       = useState(null);
-  const [pendingConnection,  setPendingConnection]   = useState(null);
-  // pendingBioConnection holds a confirmed type (PARENT/CHILD) waiting for biological choice
+  const [activeEdgeId,        setActiveEdgeId]       = useState(null);
+  const [pendingConnection,   setPendingConnection]   = useState(null);
   const [pendingBioConnection, setPendingBioConnection] = useState(null);
-
-  // Local position ref — the definitive source of truth for node positions.
-  // Updated SYNCHRONOUSLY on drag stop (before any React re-render), so if a
-  // rebuild effect fires afterwards it always reads the post-drag positions.
-  // Also synced from externalPositions on initial load and undo/redo.
-  const localPositionsRef = useRef({});
-
-  // First-layout flag — fires onPositionsChange once to seed TreeView state
-  const firstLayoutRef = useRef(true);
-
-  // hasUserMovedNodes — when true, rebuilds preserve user-placed positions
-  // instead of re-running dagre layout (prevents consecutive-drag snap-back)
-  const hasUserMovedNodes = useRef(false);
 
   const handlers = useMemo(
     () => ({
@@ -373,69 +358,29 @@ export default function TreeCanvas({
     [onPerspectiveChange, onEditPerson, onAddSpouseOf, onAddChildOf]
   );
 
-  // ── Sync local position ref from external (initial load, undo/redo) ─────────
-  // externalPositions comes from TreeView state (loaded from DB or history snapshot).
-  // We merge it into our local ref so the rebuild effect always has up-to-date positions,
-  // then apply it to rendered nodes immediately.
-  useEffect(() => {
-    if (Object.keys(externalPositions).length === 0) return;
-    localPositionsRef.current = { ...localPositionsRef.current, ...externalPositions };
-    setNodes((prev) =>
-      prev.map((n) =>
-        externalPositions[n.id] ? { ...n, position: externalPositions[n.id] } : n
-      )
-    );
-  }, [externalPositions]);
-
   // ── Full rebuild when people/relationships/display data changes ────────────
-  // When user has manually dragged nodes (hasUserMovedNodes), we update node
-  // data but PRESERVE positions from localPositionsRef — no dagre layout.
-  // This prevents consecutive-drag snap-back caused by re-renders triggered by
-  // kinship/perspective/handlers updates immediately after a drag.
+  // Positions are read directly from positionsRef.current — no dagre runs here.
+  // Nodes without a saved position get a simple grid fallback.
   useEffect(() => {
     if (people.length === 0) {
-      firstLayoutRef.current = true;
-      hasUserMovedNodes.current = false;
-      localPositionsRef.current = {};
       setNodes([]);
       setEdges([]);
       return;
     }
 
+    const positions = positionsRef?.current ?? {};
     const { nodes: rawNodes, edges: rawEdges } = buildFlowElements(
-      people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers, localPositionsRef.current
+      people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers, positions
     );
 
-    if (hasUserMovedNodes.current) {
-      // Preserve all user-placed positions; only compute layout for brand-new nodes
-      const saved = localPositionsRef.current;
-      const newNodes = rawNodes.filter((n) => !saved[n.id]);
-      let extraPositions = {};
-      if (newNodes.length > 0) {
-        const partial = computeLayout(rawNodes, rawEdges, saved);
-        newNodes.forEach((n) => {
-          const laid = partial.find((l) => l.id === n.id);
-          if (laid) extraPositions[n.id] = laid.position;
-        });
-      }
-      setNodes(rawNodes.map((n) => ({
-        ...n,
-        position: saved[n.id] ?? extraPositions[n.id] ?? n.position,
-      })));
-      setEdges(rawEdges);
-    } else {
-      const laidOut = computeLayout(rawNodes, rawEdges, localPositionsRef.current);
-      setNodes(laidOut);
-      setEdges(rawEdges);
-      // On first layout with data, publish positions so TreeView can persist them.
-      if (firstLayoutRef.current) {
-        firstLayoutRef.current = false;
-        const posMap = {};
-        laidOut.forEach((n) => { posMap[n.id] = n.position; });
-        localPositionsRef.current = posMap;
-        onPositionsChange?.(posMap);
-      }
-    }
+    setNodes(rawNodes.map((n, i) => ({
+      ...n,
+      position: positions[n.id] ?? {
+        x: 100 + (i % 4) * (NODE_WIDTH + 60),
+        y: 100 + Math.floor(i / 4) * (NODE_HEIGHT + 80),
+      },
+    })));
+    setEdges(rawEdges);
   }, [people, relationships, kinship, perspectiveId, culture, isReadOnly, handlers]);
 
   // ── Edge hover label ───────────────────────────────────────────────────────
@@ -485,7 +430,6 @@ export default function TreeCanvas({
     (type) => {
       if (!pendingConnection) return;
       if (type === 'PARENT' || type === 'CHILD') {
-        // Need to ask biological vs step before completing
         setPendingBioConnection({ source: pendingConnection.source, target: pendingConnection.target, type });
         setPendingConnection(null);
       } else {
@@ -505,26 +449,18 @@ export default function TreeCanvas({
     [pendingBioConnection, onConnectionComplete]
   );
 
-  // ── Drag-stop: update local ref IMMEDIATELY then propagate ────────────────
-  // Updating localPositionsRef.current synchronously (before any React re-render)
-  // means that if a rebuild useEffect fires right after (because callback prop
-  // references changed), it reads the post-drag positions — no snap-back.
+  // ── Drag-stop: write to shared positionsRef, then debounced-save ──────────
+  // Writing to positionsRef.current is synchronous and non-reactive — no
+  // re-render chain, no snap-back. onPositionsChange triggers the debounced
+  // backend save in TreeView.
   const handleNodeDragStop = useCallback(
     (_evt, _node, allNodes) => {
-      const posMap = {};
-      allNodes.forEach((n) => { posMap[n.id] = n.position; });
-      localPositionsRef.current = posMap;   // synchronous — always current
-      hasUserMovedNodes.current = true;     // guard subsequent rebuilds
-      onPositionsChange?.(posMap);          // async — propagates to TreeView state
+      if (!positionsRef) return;
+      allNodes.forEach((n) => { positionsRef.current[n.id] = n.position; });
+      onPositionsChange?.({ ...positionsRef.current });
     },
-    [onPositionsChange]
+    [positionsRef, onPositionsChange]
   );
-
-  // Called by AutoOrganisePanel to reset manual positions and re-run full layout
-  const handleResetLayout = useCallback(() => {
-    hasUserMovedNodes.current = false;
-    localPositionsRef.current = {};
-  }, []);
 
   return (
     <div className="w-full h-full">
@@ -572,8 +508,8 @@ export default function TreeCanvas({
               nodes={nodes}
               edges={edges}
               onSetNodes={setNodes}
+              positionsRef={positionsRef}
               onPositionsChange={onPositionsChange}
-              onResetLayout={handleResetLayout}
             />
           </Panel>
         )}

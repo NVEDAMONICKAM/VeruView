@@ -53,14 +53,18 @@ const TAMIL_TITLES = {
   fathersBrother:        { script: 'சித்தப்பா', transliteration: 'Chittappā', english: "Father's Brother" },
   fathersSister:         { script: 'அத்தை',     transliteration: 'Attai',     english: "Father's Sister" },
   mothersBrother:        { script: 'மாமா',       transliteration: 'Māmā',      english: "Mother's Brother" },
-  mothersOlderSister:    { script: 'அத்தை',     transliteration: 'Attai',     english: "Mother's Older Sister" },
+  mothersOlderSister:    { script: 'பெரியம்மா',  transliteration: 'Periyammā', english: "Mother's Older Sister" },
   mothersYoungerSister:  { script: 'சித்தி',    transliteration: 'Chitti',    english: "Mother's Younger Sister" },
   mothersSister:         { script: 'சித்தி',    transliteration: 'Chitti',    english: "Mother's Sister" },
 
-  fathersBrotherWife:   { script: 'சித்தி / பெரியம்மா', transliteration: 'Chitti / Periyammā',    english: "Father's Brother's Wife" },
-  fathersSisterHusband: { script: 'மாமா',                 transliteration: 'Māmā',                  english: "Father's Sister's Husband" },
-  mothersBrotherWife:   { script: 'அத்தை',                transliteration: 'Attai',                 english: "Mother's Brother's Wife" },
-  mothersSisterHusband: { script: 'சித்தப்பா / பெரியப்பா', transliteration: 'Chittappā / Periyappā', english: "Mother's Sister's Husband" },
+  fathersBrotherWife:        { script: 'சித்தி / பெரியம்மா', transliteration: 'Chitti / Periyammā',    english: "Father's Brother's Wife" },
+  fathersOlderBrotherWife:   { script: 'பெரியம்மா',          transliteration: 'Periyammā',             english: "Father's Older Brother's Wife" },
+  fathersYoungerBrotherWife: { script: 'சித்தி',              transliteration: 'Chitti',                english: "Father's Younger Brother's Wife" },
+  fathersSisterHusband:      { script: 'மாமா',                transliteration: 'Māmā',                  english: "Father's Sister's Husband" },
+  mothersBrotherWife:        { script: 'மாமி',                transliteration: 'Māmi',                  english: "Mother's Brother's Wife" },
+  mothersSisterHusband:      { script: 'சித்தப்பா / பெரியப்பா', transliteration: 'Chittappā / Periyappā', english: "Mother's Sister's Husband" },
+  mothersOlderSisterHusband: { script: 'பெரியப்பா',           transliteration: 'Periyappā',             english: "Mother's Older Sister's Husband" },
+  mothersYoungerSisterHusband:{ script: 'சித்தப்பா',          transliteration: 'Chittappā',             english: "Mother's Younger Sister's Husband" },
 
   husband: { script: 'கணவன்',   transliteration: 'Kaṇavan',  english: 'Husband' },
   wife:    { script: 'மனைவி',   transliteration: 'Maṉaivi',  english: 'Wife' },
@@ -403,8 +407,47 @@ export function deriveTitleKey(path, targetPerson, perspectivePerson, adjacency,
       return 'ancestor';
     case 'parent.parent.child.child':
       return 'cousin';
-    case 'parent.parent.child.spouse':
+    case 'parent.parent.child.spouse': {
+      // targetPerson is the spouse of an uncle/aunt.
+      // Navigate: find which uncle/aunt is targetPerson's spouse,
+      // then find which of persp's parents is the bridge sibling of that uncle/aunt.
+      const perspParentsUAS = adjacency[perspectivePerson?.id]?.parents ?? [];
+      let uncleAuntPersonUAS = null;
+      let bridgeParentUAS = null;
+      outerUAS: for (const { id: pId } of perspParentsUAS) {
+        for (const { id: gpId } of (adjacency[pId]?.parents ?? [])) {
+          for (const uaId of (adjacency[gpId]?.children ?? [])) {
+            if (uaId === pId) continue;
+            if ((adjacency[uaId]?.spouses ?? []).includes(targetPerson.id)) {
+              uncleAuntPersonUAS = adjacency[uaId]?.person;
+              bridgeParentUAS    = adjacency[pId]?.person;
+              break outerUAS;
+            }
+          }
+        }
+      }
+      if (!uncleAuntPersonUAS || !bridgeParentUAS) return 'relative';
+      const bGenderUAS = bridgeParentUAS.gender;
+      const uGenderUAS = uncleAuntPersonUAS.gender;
+      const bDobUAS = bridgeParentUAS.dob    ? new Date(bridgeParentUAS.dob)    : null;
+      const uDobUAS = uncleAuntPersonUAS.dob ? new Date(uncleAuntPersonUAS.dob) : null;
+      const uaIsOlder = bDobUAS && uDobUAS ? uDobUAS < bDobUAS : null;
+      if (bGenderUAS === 'MALE') {
+        if (uGenderUAS === 'MALE') {
+          if (uaIsOlder === null) return 'fathersBrotherWife';
+          return uaIsOlder ? 'fathersOlderBrotherWife' : 'fathersYoungerBrotherWife';
+        }
+        if (uGenderUAS === 'FEMALE') return 'fathersSisterHusband';
+      }
+      if (bGenderUAS === 'FEMALE') {
+        if (uGenderUAS === 'MALE') return 'mothersBrotherWife';
+        if (uGenderUAS === 'FEMALE') {
+          if (uaIsOlder === null) return 'mothersSisterHusband';
+          return uaIsOlder ? 'mothersOlderSisterHusband' : 'mothersYoungerSisterHusband';
+        }
+      }
       return 'relative';
+    }
 
     default:
       return null;
