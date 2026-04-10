@@ -10,6 +10,7 @@ import TopBar from '../components/TopBar';
 import TreeCanvas from '../components/TreeCanvas';
 import PersonModal from '../components/PersonModal';
 import RelationshipModal from '../components/RelationshipModal';
+import InfoGuide from '../components/InfoGuide';
 import { useHistory } from '../hooks/useHistory';
 import { computeAllKinshipTitles } from '../lib/kinship';
 
@@ -105,6 +106,7 @@ export default function TreeView() {
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState('');
   const [drawerOpen,    setDrawerOpen]    = useState(false);
+  const [guideOpen,     setGuideOpen]     = useState(false);
   const [personModal,   setPersonModal]   = useState(null);
   const [relModal,      setRelModal]      = useState(null);
 
@@ -541,6 +543,19 @@ export default function TreeView() {
           )}
         </main>
 
+        {/* Info / Guide button — fixed bottom-right, above mobile FAB */}
+        <button
+          className="fixed bottom-24 right-6 sm:bottom-6 sm:right-20 z-30 w-11 h-11 rounded-full
+                     bg-earth-warmWhite border border-veru-mid text-veru-dark
+                     hover:bg-veru-light transition-colors shadow-md
+                     flex items-center justify-center text-base font-semibold"
+          onClick={() => setGuideOpen(true)}
+          aria-label="Open guide"
+          title="How to use VeruView"
+        >
+          ℹ
+        </button>
+
         {/* Mobile FAB */}
         <button
           className="sm:hidden fixed bottom-6 right-6 z-30 w-14 h-14 bg-earth-terra hover:bg-earth-terraDark text-white rounded-full shadow-lg flex items-center justify-center transition-colors"
@@ -583,6 +598,12 @@ export default function TreeView() {
           children={spouseChildPrompt.partnerChildren}
           onComplete={handleSpouseChildPromptComplete}
           onSkip={() => setSpouseChildPrompt(null)}
+        />
+      )}
+      {guideOpen && (
+        <InfoGuide
+          culture={tree?.culture ?? 'ENGLISH'}
+          onClose={() => setGuideOpen(false)}
         />
       )}
     </div>

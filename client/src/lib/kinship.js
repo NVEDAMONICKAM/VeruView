@@ -27,8 +27,10 @@ const TAMIL_TITLES = {
   mother:  { script: 'அம்மா',    transliteration: 'Ammā',    english: 'Mother' },
   parent:  { script: 'பெற்றோர்', transliteration: 'Peṯṯōr',  english: 'Parent' },
 
-  stepFather: { script: 'மாற்றானப்பன்', transliteration: 'Māṟṟāṉappaṉ', english: 'Step-Father' },
-  stepMother: { script: 'மாற்றாந்தாய்', transliteration: 'Māṟṟāntāy',   english: 'Step-Mother' },
+  stepFather:   { script: 'மாற்றானப்பன்', transliteration: 'Māṟṟāṉappaṉ', english: 'Step-Father' },
+  stepMother:   { script: 'மாற்றாந்தாய்', transliteration: 'Māṟṟāntāy',   english: 'Step-Mother' },
+  stepBrother:  { script: 'அண்ணன்',       transliteration: 'Aṇṇan',       english: 'Step-brother' },
+  stepSister:   { script: 'அக்கா',        transliteration: 'Akkā',         english: 'Step-sister' },
 
   olderBrother:   { script: 'அண்ணன்',  transliteration: 'Aṇṇan',     english: 'Older Brother' },
   youngerBrother: { script: 'தம்பி',    transliteration: 'Tambi',     english: 'Younger Brother' },
@@ -47,6 +49,8 @@ const TAMIL_TITLES = {
   greatGrandfather: { script: 'கொள்ளுத் தாத்தா', transliteration: 'Koḷḷu Tāttā', english: 'Great-Grandfather' },
   greatGrandmother: { script: 'கொள்ளுப் பாட்டி',  transliteration: 'Koḷḷu Pāṭṭi', english: 'Great-Grandmother' },
   ancestor:         { script: 'முன்னோர்',           transliteration: 'Muṉṉōr',      english: 'Ancestor' },
+  grandUncle:       { script: 'தாத்தா',             transliteration: 'Tāttā',       english: 'Grand-uncle' },
+  grandAunt:        { script: 'பாட்டி',              transliteration: 'Pāṭṭi',       english: 'Grand-aunt' },
 
   fathersOlderBrother:   { script: 'பெரியப்பா', transliteration: 'Periyappā', english: "Father's Older Brother" },
   fathersYoungerBrother: { script: 'சித்தப்பா', transliteration: 'Chittappā', english: "Father's Younger Brother" },
@@ -220,7 +224,7 @@ function deriveSiblings(perspectiveId, adjacency, pathMap) {
 
     // Check 2: candidate's parent is a non-parent spouse of persp's parent (step-sibling)
     const isStepSibling = candidateParentIds.some((id) => parentSpouseIds.has(id));
-    if (isStepSibling) { pathMap.set(candidateId, 'sibling'); }
+    if (isStepSibling) { pathMap.set(candidateId, 'step_sibling'); }
   }
 }
 
@@ -448,6 +452,37 @@ export function deriveTitleKey(path, targetPerson, perspectivePerson, adjacency,
       }
       return 'relative';
     }
+
+    // ── Step-sibling ──────────────────────────────────────────────────────────
+    case 'step_sibling':
+      return gender === 'MALE' ? 'stepBrother' : gender === 'FEMALE' ? 'stepSister' : 'relative';
+
+    // ── Sibling-in-law extensions ──────────────────────────────────────────
+    // sibling's spouse's children (brother-in-law's / sister-in-law's child)
+    case 'parent.child.spouse.child':
+      return gender === 'MALE' ? 'nephew' : gender === 'FEMALE' ? 'niece' : 'relative';
+    // nephew's / niece's spouse
+    case 'parent.child.child.spouse':
+      return gender === 'MALE' ? 'nephew' : gender === 'FEMALE' ? 'niece' : 'relative';
+    // sibling.child.spouse (same semantics, if reached via deriveExtended path)
+    case 'sibling.child.spouse':
+      return gender === 'MALE' ? 'nephew' : gender === 'FEMALE' ? 'niece' : 'relative';
+
+    // ── Spouse's extended family ───────────────────────────────────────────
+    // spouse's sibling's spouse
+    case 'spouse.parent.child.spouse':
+      return gender === 'MALE' ? 'brotherInLaw' : gender === 'FEMALE' ? 'sisterInLaw' : 'relative';
+    // spouse's sibling's children
+    case 'spouse.parent.child.child':
+      return gender === 'MALE' ? 'nephew' : gender === 'FEMALE' ? 'niece' : 'relative';
+
+    // ── Grand-uncle / Grand-aunt ───────────────────────────────────────────
+    // grandparent's sibling (great-grandparent's other child)
+    case 'parent.parent.parent.child':
+      return gender === 'MALE' ? 'grandUncle' : gender === 'FEMALE' ? 'grandAunt' : 'relative';
+    // grandparent's sibling's spouse
+    case 'parent.parent.parent.child.spouse':
+      return gender === 'MALE' ? 'grandUncle' : gender === 'FEMALE' ? 'grandAunt' : 'relative';
 
     default:
       return null;

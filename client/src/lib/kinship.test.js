@@ -375,7 +375,7 @@ describe('4-person minimal family (step-parent + step-sibling BUG C)', () => {
   it('4p: BUG C — step-sibling detected via parent-spouse-child chain', () => {
     // step is mama's child; mama is papa's spouse; papa is kid's parent
     // they share no direct parent → step is a step-sibling
-    expect(key(r4, 'step')).toBe('olderSister');
+    expect(key(r4, 'step')).toBe('stepSister');
   });
 
   // Order variant: relationships listed in reverse order
@@ -383,7 +383,7 @@ describe('4-person minimal family (step-parent + step-sibling BUG C)', () => {
     const r4rev = computeAllKinshipTitles('kid', [...people4].reverse(), [...rels4].reverse(), 'ENGLISH');
     expect(key(r4rev, 'papa')).toBe('father');
     expect(key(r4rev, 'mama')).toBe('stepMother');
-    expect(key(r4rev, 'step')).toBe('olderSister');
+    expect(key(r4rev, 'step')).toBe('stepSister');
   });
 
   // CHILD edge direction instead of PARENT
@@ -396,7 +396,7 @@ describe('4-person minimal family (step-parent + step-sibling BUG C)', () => {
     const r4c = computeAllKinshipTitles('kid', people4, relsChild, 'ENGLISH');
     expect(key(r4c, 'papa')).toBe('father');
     expect(key(r4c, 'mama')).toBe('stepMother');
-    expect(key(r4c, 'step')).toBe('olderSister');
+    expect(key(r4c, 'step')).toBe('stepSister');
   });
 
   // Paternal grandparent via paternal bridge
@@ -443,4 +443,189 @@ describe('4-person minimal family (step-parent + step-sibling BUG C)', () => {
     const r4i = computeAllKinshipTitles('kid', [...people4, iso], rels4, 'ENGLISH');
     expect(key(r4i, 'iso')).toBeNull();
   });
+});
+
+// ---------------------------------------------------------------------------
+// FAMILY 11 — Brother-in-law's family
+//
+//   Self ── Spouse
+//           Spouse ── BrInLaw (MALE)
+//                     BrInLaw ── BIL_Wife (FEMALE)  ← spouse
+//                     BrInLaw has Child_M (MALE) and Child_F (FEMALE)
+//
+//   Self → BrInLaw = brotherInLaw (மைத்துனன்)
+//   Self → BIL_Wife = sisterInLaw (நாத்தனார்)
+//   Self → BIL_Child_M = nephew (மருமகன்)
+//   Self → BIL_Child_F = niece (மருமகள்)
+// ---------------------------------------------------------------------------
+describe('Family 11 — brother-in-law extended family', () => {
+  const peop11 = [
+    p('self',      'Self',      'MALE',   '1990-01-01'),
+    p('sp11',      'Spouse',    'FEMALE', '1992-01-01'),
+    p('sp11_par',  'SpPar',     'MALE',   '1960-01-01'), // spouse's parent
+    p('bil',       'BrInLaw',   'MALE',   '1988-01-01'),
+    p('bil_wife',  'BILWife',   'FEMALE', '1989-01-01'),
+    p('bil_cm',    'BILChildM', 'MALE',   '2015-01-01'),
+    p('bil_cf',    'BILChildF', 'FEMALE', '2017-01-01'),
+  ];
+  const rels11 = [
+    rel('f11_1', 'self',     'sp11',     'SPOUSE'),
+    rel('f11_2', 'sp11_par', 'sp11',     'PARENT'),
+    rel('f11_3', 'sp11_par', 'bil',      'PARENT'),
+    rel('f11_4', 'bil',      'bil_wife', 'SPOUSE'),
+    rel('f11_5', 'bil',      'bil_cm',   'PARENT'),
+    rel('f11_6', 'bil',      'bil_cf',   'PARENT'),
+  ];
+  const r11 = computeAllKinshipTitles('self', peop11, rels11, 'ENGLISH');
+  const t11 = computeAllKinshipTitles('self', peop11, rels11, 'TAMIL');
+
+  it('11: brother-in-law = brotherInLaw', () =>
+    expect(key(r11, 'bil')).toBe('brotherInLaw'));
+  it('11: brother-in-law partner (female) = sisterInLaw', () =>
+    expect(key(r11, 'bil_wife')).toBe('sisterInLaw'));
+  it('11: brother-in-law child (male) = nephew', () =>
+    expect(key(r11, 'bil_cm')).toBe('nephew'));
+  it('11: brother-in-law child (female) = niece', () =>
+    expect(key(r11, 'bil_cf')).toBe('niece'));
+  it('11: Tamil — brotherInLaw script is மைத்துனன்', () =>
+    expect(t11['bil']?.title?.script).toBe('மைத்துனன்'));
+  it('11: Tamil — sisterInLaw script is நாத்தனார்', () =>
+    expect(t11['bil_wife']?.title?.script).toBe('நாத்தனார்'));
+  it('11: Tamil — nephew script is மருமகன்', () =>
+    expect(t11['bil_cm']?.title?.script).toBe('மருமகன்'));
+  it('11: Tamil — niece script is மருமகள்', () =>
+    expect(t11['bil_cf']?.title?.script).toBe('மருமகள்'));
+});
+
+// ---------------------------------------------------------------------------
+// FAMILY 12 — Sister-in-law's family
+//
+//   Self ── Spouse
+//           Spouse ── SisInLaw (FEMALE)
+//                     SisInLaw ── SIL_Husband (MALE)
+//                     SisInLaw has Child_M and Child_F
+//
+//   Self → SisInLaw = sisterInLaw (நாத்தனார்)
+//   Self → SIL_Husband = brotherInLaw (மைத்துனன்)
+//   Self → SIL_Child_M = nephew (மருமகன்)
+//   Self → SIL_Child_F = niece (மருமகள்)
+// ---------------------------------------------------------------------------
+describe('Family 12 — sister-in-law extended family', () => {
+  const peop12 = [
+    p('self',      'Self',      'MALE',   '1990-01-01'),
+    p('sp12',      'Spouse',    'FEMALE', '1992-01-01'),
+    p('sp12_par',  'SpPar',     'FEMALE', '1960-01-01'),
+    p('sil',       'SisInLaw',  'FEMALE', '1994-01-01'),
+    p('sil_hus',   'SILHus',    'MALE',   '1992-01-01'),
+    p('sil_cm',    'SILChildM', 'MALE',   '2018-01-01'),
+    p('sil_cf',    'SILChildF', 'FEMALE', '2020-01-01'),
+  ];
+  const rels12 = [
+    rel('f12_1', 'self',     'sp12',    'SPOUSE'),
+    rel('f12_2', 'sp12_par', 'sp12',    'PARENT'),
+    rel('f12_3', 'sp12_par', 'sil',     'PARENT'),
+    rel('f12_4', 'sil',      'sil_hus', 'SPOUSE'),
+    rel('f12_5', 'sil',      'sil_cm',  'PARENT'),
+    rel('f12_6', 'sil',      'sil_cf',  'PARENT'),
+  ];
+  const r12 = computeAllKinshipTitles('self', peop12, rels12, 'ENGLISH');
+  const t12 = computeAllKinshipTitles('self', peop12, rels12, 'TAMIL');
+
+  it('12: sister-in-law = sisterInLaw', () =>
+    expect(key(r12, 'sil')).toBe('sisterInLaw'));
+  it('12: sister-in-law partner (male) = brotherInLaw', () =>
+    expect(key(r12, 'sil_hus')).toBe('brotherInLaw'));
+  it('12: sister-in-law child (male) = nephew', () =>
+    expect(key(r12, 'sil_cm')).toBe('nephew'));
+  it('12: sister-in-law child (female) = niece', () =>
+    expect(key(r12, 'sil_cf')).toBe('niece'));
+  it('12: Tamil — sisterInLaw script is நாத்தனார்', () =>
+    expect(t12['sil']?.title?.script).toBe('நாத்தனார்'));
+  it('12: Tamil — brotherInLaw script is மைத்துனன்', () =>
+    expect(t12['sil_hus']?.title?.script).toBe('மைத்துனன்'));
+});
+
+// ---------------------------------------------------------------------------
+// FAMILY 13 — Grand-uncle and grand-aunt
+//
+//   GGF ── GGM  (great-grandparents)
+//        |
+//   GPF (grandfather) ── GPF_Bro (grand-uncle, MALE, born before GPF)
+//                        GPF_Bro ── GPF_Bro_W (FEMALE)  ← grand-aunt
+//
+//   Self → GPF_Bro  = grandUncle (தாத்தா)
+//   Self → GPF_Bro_W = grandAunt (பாட்டி)
+// ---------------------------------------------------------------------------
+describe('Family 13 — grand-uncle and grand-aunt', () => {
+  const peop13 = [
+    p('self',      'Self',     'MALE',   '1990-01-01'),
+    p('f13',       'Father',   'MALE',   '1960-01-01'),
+    p('gpf13',     'GrandFa',  'MALE',   '1930-01-01'),
+    p('ggf13',     'GrtGrdFa', 'MALE',   '1900-01-01'),
+    p('ggm13',     'GrtGrdMa', 'FEMALE', '1902-01-01'),
+    p('guncle',    'GrandUncle','MALE',  '1928-01-01'), // born before gpf → older
+    p('gaunt',     'GrandAunt','FEMALE', '1935-01-01'),
+  ];
+  const rels13 = [
+    rel('g13_1', 'f13',   'self',   'PARENT'),
+    rel('g13_2', 'gpf13', 'f13',    'PARENT'),
+    rel('g13_3', 'ggf13', 'gpf13',  'PARENT'),
+    rel('g13_4', 'ggm13', 'gpf13',  'PARENT'),
+    rel('g13_5', 'ggf13', 'guncle', 'PARENT'),
+    rel('g13_6', 'ggm13', 'guncle', 'PARENT'),
+    rel('g13_7', 'guncle','gaunt',  'SPOUSE'),
+  ];
+  const r13 = computeAllKinshipTitles('self', peop13, rels13, 'ENGLISH');
+  const t13 = computeAllKinshipTitles('self', peop13, rels13, 'TAMIL');
+
+  it("13: grandfather's brother = grandUncle", () =>
+    expect(key(r13, 'guncle')).toBe('grandUncle'));
+  it("13: grand-uncle's wife = grandAunt", () =>
+    expect(key(r13, 'gaunt')).toBe('grandAunt'));
+  it('13: Tamil — grandUncle script is தாத்தா', () =>
+    expect(t13['guncle']?.title?.script).toBe('தாத்தா'));
+  it('13: Tamil — grandAunt script is பாட்டி', () =>
+    expect(t13['gaunt']?.title?.script).toBe('பாட்டி'));
+});
+
+// ---------------------------------------------------------------------------
+// FAMILY 14 — Step-siblings
+//
+//   Father ── StepMom (SPOUSE, not biological parent of Self)
+//             StepMom has StepBro (MALE, older) and StepSis (FEMALE, younger)
+//
+//   Self → StepBro = stepBrother (அண்ணன் · Step-brother)
+//   Self → StepSis = stepSister  (அக்கா  · Step-sister)
+// ---------------------------------------------------------------------------
+describe('Family 14 — step-siblings', () => {
+  const peop14 = [
+    p('self',    'Self',    'MALE',   '1990-01-01'),
+    p('f14',     'Father',  'MALE',   '1960-01-01'),
+    p('stepmom', 'StepMom', 'FEMALE', '1963-01-01'),
+    p('stepbro', 'StepBro', 'MALE',   '1985-01-01'), // older than self
+    p('stepsis', 'StepSis', 'FEMALE', '1995-01-01'), // younger than self
+  ];
+  const rels14 = [
+    rel('f14_1', 'f14',     'self',    'PARENT'),
+    rel('f14_2', 'f14',     'stepmom', 'SPOUSE'),
+    rel('f14_3', 'stepmom', 'stepbro', 'PARENT'),
+    rel('f14_4', 'stepmom', 'stepsis', 'PARENT'),
+  ];
+  const r14 = computeAllKinshipTitles('self', peop14, rels14, 'ENGLISH');
+  const t14 = computeAllKinshipTitles('self', peop14, rels14, 'TAMIL');
+
+  it('14: step-mother correctly identified', () =>
+    expect(key(r14, 'stepmom')).toBe('stepMother'));
+  it('14: step-sibling (male, older) = stepBrother', () =>
+    expect(key(r14, 'stepbro')).toBe('stepBrother'));
+  it('14: step-sibling (female, younger) = stepSister', () =>
+    expect(key(r14, 'stepsis')).toBe('stepSister'));
+  it('14: Tamil — stepBrother script is அண்ணன்', () =>
+    expect(t14['stepbro']?.title?.script).toBe('அண்ணன்'));
+  it('14: Tamil — stepSister script is அக்கா', () =>
+    expect(t14['stepsis']?.title?.script).toBe('அக்கா'));
+  it('14: English — stepBrother english is Step-brother', () =>
+    expect(r14['stepbro']?.title?.english).toBe('Step-brother'));
+  it('14: English — stepSister english is Step-sister', () =>
+    expect(r14['stepsis']?.title?.english).toBe('Step-sister'));
 });

@@ -32,6 +32,8 @@ const TAMIL_TITLES = {
 
   stepFather:           { script: 'மாற்றானப்பன்', transliteration: 'Māṟṟāṉappaṉ', english: 'Step-Father' },
   stepMother:           { script: 'மாற்றாந்தாய்', transliteration: 'Māṟṟāntāy',   english: 'Step-Mother' },
+  stepBrother:          { script: 'அண்ணன்',       transliteration: 'Aṇṇan',       english: 'Step-brother' },
+  stepSister:           { script: 'அக்கா',        transliteration: 'Akkā',         english: 'Step-sister' },
 
   olderBrother:         { script: 'அண்ணன்',     transliteration: 'Aṇṇan',       english: 'Older Brother' },
   youngerBrother:       { script: 'தம்பி',       transliteration: 'Tambi',       english: 'Younger Brother' },
@@ -50,6 +52,8 @@ const TAMIL_TITLES = {
   greatGrandfather:     { script: 'கொள்ளுத் தாத்தா', transliteration: 'Koḷḷu Tāttā', english: 'Great-Grandfather' },
   greatGrandmother:     { script: 'கொள்ளுப் பாட்டி',  transliteration: 'Koḷḷu Pāṭṭi', english: 'Great-Grandmother' },
   ancestor:             { script: 'முன்னோர்',        transliteration: 'Muṉṉōr',      english: 'Ancestor' },
+  grandUncle:           { script: 'தாத்தா',           transliteration: 'Tāttā',       english: 'Grand-uncle' },
+  grandAunt:            { script: 'பாட்டி',            transliteration: 'Pāṭṭi',       english: 'Grand-aunt' },
 
   fathersOlderBrother:  { script: 'பெரியப்பா',   transliteration: 'Periyappā',   english: "Father's Older Brother" },
   fathersYoungerBrother:{ script: 'சித்தப்பா',   transliteration: 'Chittappā',   english: "Father's Younger Brother" },
@@ -219,7 +223,7 @@ function deriveSiblings(perspectiveId, graph, pathMap) {
 
     // Check 2: candidate's parent is a non-parent spouse of persp's parent (step-sibling)
     const isStepSibling = candidateParentIds.some((id) => parentSpouseIds.has(id));
-    if (isStepSibling) { pathMap.set(candidateId, 'sibling'); }
+    if (isStepSibling) { pathMap.set(candidateId, 'step_sibling'); }
   }
 }
 
@@ -407,6 +411,30 @@ function deriveTitleKey(path, targetPerson, perspectivePerson, biologicalMap, gr
       }
       return 'relative';
     }
+
+    // ── Step-sibling ──────────────────────────────────────────────────────────
+    case 'step_sibling':
+      return gender === 'MALE' ? 'stepBrother' : gender === 'FEMALE' ? 'stepSister' : 'relative';
+
+    // ── Sibling-in-law extensions ──────────────────────────────────────────
+    case 'parent.child.spouse.child':
+      return gender === 'MALE' ? 'nephew' : gender === 'FEMALE' ? 'niece' : 'relative';
+    case 'parent.child.child.spouse':
+      return gender === 'MALE' ? 'nephew' : gender === 'FEMALE' ? 'niece' : 'relative';
+    case 'sibling.child.spouse':
+      return gender === 'MALE' ? 'nephew' : gender === 'FEMALE' ? 'niece' : 'relative';
+
+    // ── Spouse's extended family ───────────────────────────────────────────
+    case 'spouse.parent.child.spouse':
+      return gender === 'MALE' ? 'brotherInLaw' : gender === 'FEMALE' ? 'sisterInLaw' : 'relative';
+    case 'spouse.parent.child.child':
+      return gender === 'MALE' ? 'nephew' : gender === 'FEMALE' ? 'niece' : 'relative';
+
+    // ── Grand-uncle / Grand-aunt ───────────────────────────────────────────
+    case 'parent.parent.parent.child':
+      return gender === 'MALE' ? 'grandUncle' : gender === 'FEMALE' ? 'grandAunt' : 'relative';
+    case 'parent.parent.parent.child.spouse':
+      return gender === 'MALE' ? 'grandUncle' : gender === 'FEMALE' ? 'grandAunt' : 'relative';
 
     default:
       return null;
