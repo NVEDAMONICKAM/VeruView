@@ -29,7 +29,8 @@ model FamilyTree {
   owner             User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   culture           Culture        @default(ENGLISH)
   createdAt         DateTime       @default(now())
-  nodePositionsJson Json?          @default("{}")
+  nodePositionsJson    Json?   @default("{}")
+  grandmotherVariant   String  @default("PATTI_BOTH")
 
   people        Person[]
   relationships Relationship[]

@@ -102,6 +102,15 @@ const TAMIL_TITLES = {
 
   cousin: { script: 'உறவினர் குழந்தை', transliteration: 'Uṟaviṉar Kuḻantai', english: 'Cousin' },
 
+  crossCousinMale:      { script: 'அத்தான்',     transliteration: 'Attān',       english: 'Cross-cousin (male)' },
+  crossCousinFemale:    { script: 'மச்சினி',     transliteration: 'Macciṉi',     english: 'Cross-cousin (female)' },
+  parallelCousinMale:   { script: 'சித்தன்',     transliteration: 'Chittan',     english: 'Parallel Cousin (male)' },
+  parallelCousinFemale: { script: 'சித்தி மகள்', transliteration: 'Chitti Makaḷ', english: 'Parallel Cousin (female)' },
+
+  maternalGrandmotherAmmachi:  { script: 'அம்மாச்சி', transliteration: 'Ammācci', english: 'Grandmother (maternal)' },
+  paternalGrandmotherAmmachi:  { script: 'அம்மாச்சி', transliteration: 'Ammācci', english: 'Grandmother (paternal)' },
+  grandmotherAmmachi:          { script: 'அம்மாச்சி', transliteration: 'Ammācci', english: 'Grandmother' },
+
   relative: { script: 'உறவினர்', transliteration: 'Uṟaviṉar', english: 'Relative' },
 };
 
@@ -270,9 +279,40 @@ function deriveExtended(perspectiveId, adjacency, pathMap) {
 }
 
 // ---------------------------------------------------------------------------
+// Cousin resolver — determines cross vs parallel cousin from adjacency map
+// ---------------------------------------------------------------------------
+function resolveCousin(targetPerson, perspectivePerson, adjacency) {
+  const perspParents = adjacency[perspectivePerson.id]?.parents ?? [];
+  for (const { id: parentId } of perspParents) {
+    const parentNode = adjacency[parentId];
+    if (!parentNode) continue;
+    for (const { id: gpId } of (parentNode.parents ?? [])) {
+      const gpNode = adjacency[gpId];
+      if (!gpNode) continue;
+      for (const uaId of (gpNode.children ?? [])) {
+        if (uaId === parentId) continue;
+        const uaNode = adjacency[uaId];
+        if (!uaNode) continue;
+        if (uaNode.children.includes(targetPerson.id)) {
+          const parentGender = parentNode.person.gender;
+          const uaGender = uaNode.person.gender;
+          const isCross = parentGender && uaGender &&
+            parentGender !== 'OTHER' && uaGender !== 'OTHER' &&
+            parentGender !== uaGender;
+          const g = targetPerson.gender;
+          if (isCross) return g === 'MALE' ? 'crossCousinMale' : g === 'FEMALE' ? 'crossCousinFemale' : 'relative';
+          return g === 'MALE' ? 'parallelCousinMale' : g === 'FEMALE' ? 'parallelCousinFemale' : 'relative';
+        }
+      }
+    }
+  }
+  return 'cousin';
+}
+
+// ---------------------------------------------------------------------------
 // Step 5 — Derive a title key from a path string + target person gender
 // ---------------------------------------------------------------------------
-export function deriveTitleKey(path, targetPerson, perspectivePerson, adjacency, biologicalMap) {
+export function deriveTitleKey(path, targetPerson, perspectivePerson, adjacency, biologicalMap, treeSettings) {
   const gender = targetPerson?.gender;
 
   switch (path) {
@@ -311,8 +351,13 @@ export function deriveTitleKey(path, targetPerson, perspectivePerson, adjacency,
           break;
         }
       }
-      if (gender === 'MALE')   return bridgeGender === 'MALE' ? 'paternalGrandfather' : bridgeGender === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
-      if (gender === 'FEMALE') return bridgeGender === 'MALE' ? 'paternalGrandmother' : bridgeGender === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      if (gender === 'MALE') return bridgeGender === 'MALE' ? 'paternalGrandfather' : bridgeGender === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
+      if (gender === 'FEMALE') {
+        const variant = treeSettings?.grandmotherVariant ?? 'PATTI_BOTH';
+        if (variant === 'AMMACHI_BOTH') return bridgeGender === 'MALE' ? 'paternalGrandmotherAmmachi' : bridgeGender === 'FEMALE' ? 'maternalGrandmotherAmmachi' : 'grandmotherAmmachi';
+        if (variant === 'PATTI_AMMACHI') return bridgeGender === 'FEMALE' ? 'maternalGrandmotherAmmachi' : bridgeGender === 'MALE' ? 'paternalGrandmother' : 'grandmother';
+        return bridgeGender === 'MALE' ? 'paternalGrandmother' : bridgeGender === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      }
       return 'ancestor';
     }
     case 'parent.spouse': {
@@ -354,8 +399,13 @@ export function deriveTitleKey(path, targetPerson, perspectivePerson, adjacency,
           }
         }
       }
-      if (gender === 'MALE')   return bridgeGender2 === 'MALE' ? 'paternalGrandfather' : bridgeGender2 === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
-      if (gender === 'FEMALE') return bridgeGender2 === 'MALE' ? 'paternalGrandmother' : bridgeGender2 === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      if (gender === 'MALE') return bridgeGender2 === 'MALE' ? 'paternalGrandfather' : bridgeGender2 === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
+      if (gender === 'FEMALE') {
+        const variant = treeSettings?.grandmotherVariant ?? 'PATTI_BOTH';
+        if (variant === 'AMMACHI_BOTH') return bridgeGender2 === 'MALE' ? 'paternalGrandmotherAmmachi' : bridgeGender2 === 'FEMALE' ? 'maternalGrandmotherAmmachi' : 'grandmotherAmmachi';
+        if (variant === 'PATTI_AMMACHI') return bridgeGender2 === 'FEMALE' ? 'maternalGrandmotherAmmachi' : bridgeGender2 === 'MALE' ? 'paternalGrandmother' : 'grandmother';
+        return bridgeGender2 === 'MALE' ? 'paternalGrandmother' : bridgeGender2 === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      }
       return 'ancestor';
     }
     case 'parent.parent.child': {
@@ -410,7 +460,7 @@ export function deriveTitleKey(path, targetPerson, perspectivePerson, adjacency,
     case 'parent.parent.spouse.parent':
       return 'ancestor';
     case 'parent.parent.child.child':
-      return 'cousin';
+      return resolveCousin(targetPerson, perspectivePerson, adjacency);
     case 'parent.parent.child.spouse': {
       // targetPerson is the spouse of an uncle/aunt.
       // Navigate: find which uncle/aunt is targetPerson's spouse,
@@ -521,7 +571,7 @@ function siblingKey(perspective, target) {
 // Main export
 // Returns { [personId]: { kinshipKey: string | null, title: object | null } }
 // ---------------------------------------------------------------------------
-export function computeAllKinshipTitles(perspectiveId, people, relationships, culture) {
+export function computeAllKinshipTitles(perspectiveId, people, relationships, culture, treeSettings = {}) {
   const titleMap  = CULTURE_TITLES[culture] ?? ENGLISH_TITLES;
   const peopleMap = new Map(people.map((p) => [p.id, p]));
   const { map: adjacency, biologicalMap } = buildAdjacencyMap(people, relationships);
@@ -554,7 +604,7 @@ export function computeAllKinshipTitles(perspectiveId, people, relationships, cu
       continue;
     }
 
-    const titleKey = deriveTitleKey(path, person, perspective, adjacency, biologicalMap);
+    const titleKey = deriveTitleKey(path, person, perspective, adjacency, biologicalMap, treeSettings);
 
     if (!titleKey) {
       // Reachable but path not specifically modelled → relative

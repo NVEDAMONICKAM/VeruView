@@ -60,9 +60,13 @@ router.get('/:id', requireAuth, async (req, res) => {
   }
 });
 
-// PUT /api/trees/:id — update name or culture
+// PUT /api/trees/:id — update name, culture, or grandmotherVariant
 router.put('/:id', requireAuth, async (req, res) => {
-  const { name, culture } = req.body;
+  const { name, culture, grandmotherVariant } = req.body;
+  const VALID_VARIANTS = ['PATTI_BOTH', 'PATTI_AMMACHI', 'AMMACHI_BOTH'];
+  if (grandmotherVariant !== undefined && !VALID_VARIANTS.includes(grandmotherVariant)) {
+    return res.status(400).json({ error: 'Invalid grandmotherVariant' });
+  }
   try {
     const tree = await prisma.familyTree.findFirst({
       where: { id: req.params.id, ownerId: req.user.id },
@@ -74,6 +78,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       data: {
         ...(name !== undefined && { name }),
         ...(culture !== undefined && { culture }),
+        ...(grandmotherVariant !== undefined && { grandmotherVariant }),
       },
     });
     res.json(updated);
@@ -93,6 +98,101 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
     await prisma.familyTree.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/trees/duplicate — deep-copy a shared tree into the logged-in user's account
+router.post('/duplicate', requireAuth, async (req, res) => {
+  const { shareToken, newName } = req.body;
+  if (!shareToken) return res.status(400).json({ error: 'shareToken is required' });
+
+  try {
+    const share = await prisma.treeShare.findUnique({
+      where: { shareToken },
+      include: {
+        tree: {
+          include: {
+            people: true,
+            relationships: true,
+            titleOverrides: true,
+          },
+        },
+      },
+    });
+    if (!share) return res.status(404).json({ error: 'Share link not found' });
+
+    const src = share.tree;
+    const treeName = newName?.trim() || `${src.name} (copy)`;
+
+    // Build old→new ID maps
+    const personIdMap = new Map();
+    src.people.forEach((p) => personIdMap.set(p.id, uuidv4()));
+
+    const newTree = await prisma.$transaction(async (tx) => {
+      // 1. Create new tree
+      const created = await tx.familyTree.create({
+        data: {
+          name: treeName,
+          ownerId: req.user.id,
+          culture: src.culture,
+          grandmotherVariant: src.grandmotherVariant ?? 'PATTI_BOTH',
+          nodePositionsJson: {},
+        },
+      });
+
+      // 2. Copy people
+      if (src.people.length > 0) {
+        await tx.person.createMany({
+          data: src.people.map((p) => ({
+            id: personIdMap.get(p.id),
+            treeId: created.id,
+            name: p.name,
+            gender: p.gender,
+            dob: p.dob,
+            photoUrl: p.photoUrl,
+          })),
+        });
+      }
+
+      // 3. Copy relationships (remap person IDs)
+      if (src.relationships.length > 0) {
+        const remapped = src.relationships
+          .filter((r) => personIdMap.has(r.fromPersonId) && personIdMap.has(r.toPersonId))
+          .map((r) => ({
+            id: uuidv4(),
+            treeId: created.id,
+            fromPersonId: personIdMap.get(r.fromPersonId),
+            toPersonId: personIdMap.get(r.toPersonId),
+            type: r.type,
+            isBiological: r.isBiological,
+          }));
+        if (remapped.length > 0) {
+          await tx.relationship.createMany({ data: remapped });
+        }
+      }
+
+      // 4. Copy title overrides
+      if (src.titleOverrides.length > 0) {
+        await tx.titleOverride.createMany({
+          data: src.titleOverrides.map((ov) => ({
+            id: uuidv4(),
+            treeId: created.id,
+            relationshipKey: ov.relationshipKey,
+            culture: ov.culture,
+            script: ov.script,
+            transliteration: ov.transliteration,
+            english: ov.english,
+          })),
+        });
+      }
+
+      return created;
+    });
+
+    res.status(201).json({ treeId: newTree.id });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
@@ -137,7 +237,8 @@ router.get('/:id/kinship/:perspectiveId', requireAuth, async (req, res) => {
       tree.relationships,
       req.params.perspectiveId,
       tree.culture,
-      tree.titleOverrides
+      tree.titleOverrides,
+      { grandmotherVariant: tree.grandmotherVariant }
     );
     res.json(kinship);
   } catch (err) {

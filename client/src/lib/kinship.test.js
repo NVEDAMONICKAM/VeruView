@@ -179,8 +179,9 @@ describe('computeAllKinshipTitles', () => {
     expect(key(result, 'silh')).toBe('brotherInLaw');
   });
 
-  it('identifies cousin (parent,parent,child,child)', () => {
-    expect(key(result, 'cousin')).toBe('cousin');
+  it('identifies cousin (parent,parent,child,child) — parallel (father\'s brother\'s child)', () => {
+    // uncle is father's OLDER brother (MALE), so same sex as father (MALE) → parallel cousin
+    expect(key(result, 'cousin')).toBe('parallelCousinMale');
   });
 
   it('identifies step-parent (parent\'s spouse who is not a parent)', () => {
@@ -628,4 +629,120 @@ describe('Family 14 — step-siblings', () => {
     expect(r14['stepbro']?.title?.english).toBe('Step-brother'));
   it('14: English — stepSister english is Step-sister', () =>
     expect(r14['stepsis']?.title?.english).toBe('Step-sister'));
+});
+
+// ---------------------------------------------------------------------------
+// FAMILY 15 — Cousin titles (cross vs parallel)
+//
+//   Self — Father (MALE) — GrandFa (MALE)
+//                           GrandFa → FatherSis (FEMALE)  [father's sister]
+//                           GrandFa → FatherBro (MALE)    [father's brother]
+//   Self — Mother (FEMALE) — MatGrandFa (MALE)
+//                             MatGrandFa → MotherBro (MALE)   [mother's brother]
+//                             MatGrandFa → MotherSis (FEMALE) [mother's sister]
+//
+//   Cross-cousin (opposite sex sibling):
+//     Father's sister's child (male)   → அத்தான் · crossCousinMale
+//     Father's sister's child (female) → மச்சினி · crossCousinFemale
+//     Mother's brother's child (male)  → அத்தான் · crossCousinMale
+//     Mother's brother's child (female)→ மச்சினி · crossCousinFemale
+//
+//   Parallel cousin (same sex sibling):
+//     Father's brother's child (male)  → சித்தன் · parallelCousinMale
+//     Father's brother's child (female)→ சித்தி மகள் · parallelCousinFemale
+//     Mother's sister's child (male)   → சித்தன் · parallelCousinMale
+//     Mother's sister's child (female) → சித்தி மகள் · parallelCousinFemale
+// ---------------------------------------------------------------------------
+describe('Family 15 — cousin titles (cross vs parallel)', () => {
+  const peop15 = [
+    p('self',    'Self',       'MALE',   '1990-01-01'),
+    p('f15',     'Father',     'MALE',   '1960-01-01'),
+    p('m15',     'Mother',     'FEMALE', '1963-01-01'),
+    p('gpf15',   'GrandFa',    'MALE',   '1930-01-01'),
+    p('gpf15m',  'GrandMa',    'FEMALE', '1932-01-01'),
+    p('mgf15',   'MatGrandFa', 'MALE',   '1928-01-01'),
+    p('mgm15',   'MatGrandMa', 'FEMALE', '1930-01-01'),
+    p('fsis',    'FatherSis',  'FEMALE', '1958-01-01'), // father's sister
+    p('fbro',    'FatherBro',  'MALE',   '1955-01-01'), // father's brother
+    p('mbro',    'MotherBro',  'MALE',   '1961-01-01'), // mother's brother
+    p('msis',    'MotherSis',  'FEMALE', '1965-01-01'), // mother's sister
+    p('cc_m',    'CrossCousM', 'MALE',   '1992-01-01'), // father's sister's son
+    p('cc_f',    'CrossCousF', 'FEMALE', '1994-01-01'), // father's sister's daughter
+    p('cc_mb_m', 'MBCousM',    'MALE',   '1993-01-01'), // mother's brother's son
+    p('cc_mb_f', 'MBCousF',    'FEMALE', '1995-01-01'), // mother's brother's daughter
+    p('pc_m',    'ParCousM',   'MALE',   '1991-01-01'), // father's brother's son
+    p('pc_f',    'ParCousF',   'FEMALE', '1993-01-01'), // father's brother's daughter
+    p('pc_ms_m', 'MSCousM',    'MALE',   '1992-01-01'), // mother's sister's son
+    p('pc_ms_f', 'MSCousF',    'FEMALE', '1994-01-01'), // mother's sister's daughter
+  ];
+  const rels15 = [
+    // Core family
+    rel('f15_1',  'f15',   'self',    'PARENT'),
+    rel('f15_2',  'm15',   'self',    'PARENT'),
+    rel('f15_3',  'f15',   'm15',     'SPOUSE'),
+    // Paternal grandparents
+    rel('f15_4',  'gpf15', 'f15',     'PARENT'),
+    rel('f15_5',  'gpf15m','f15',     'PARENT'),
+    rel('f15_6',  'gpf15', 'gpf15m',  'SPOUSE'),
+    // Maternal grandparents
+    rel('f15_7',  'mgf15', 'm15',     'PARENT'),
+    rel('f15_8',  'mgm15', 'm15',     'PARENT'),
+    rel('f15_9',  'mgf15', 'mgm15',   'SPOUSE'),
+    // Father's sister and brother
+    rel('f15_10', 'gpf15', 'fsis',    'PARENT'),
+    rel('f15_11', 'gpf15m','fsis',    'PARENT'),
+    rel('f15_12', 'gpf15', 'fbro',    'PARENT'),
+    rel('f15_13', 'gpf15m','fbro',    'PARENT'),
+    // Mother's brother and sister
+    rel('f15_14', 'mgf15', 'mbro',    'PARENT'),
+    rel('f15_15', 'mgm15', 'mbro',    'PARENT'),
+    rel('f15_16', 'mgf15', 'msis',    'PARENT'),
+    rel('f15_17', 'mgm15', 'msis',    'PARENT'),
+    // Cross-cousins: father's sister's children
+    rel('f15_18', 'fsis',  'cc_m',    'PARENT'),
+    rel('f15_19', 'fsis',  'cc_f',    'PARENT'),
+    // Cross-cousins: mother's brother's children
+    rel('f15_20', 'mbro',  'cc_mb_m', 'PARENT'),
+    rel('f15_21', 'mbro',  'cc_mb_f', 'PARENT'),
+    // Parallel cousins: father's brother's children
+    rel('f15_22', 'fbro',  'pc_m',    'PARENT'),
+    rel('f15_23', 'fbro',  'pc_f',    'PARENT'),
+    // Parallel cousins: mother's sister's children
+    rel('f15_24', 'msis',  'pc_ms_m', 'PARENT'),
+    rel('f15_25', 'msis',  'pc_ms_f', 'PARENT'),
+  ];
+
+  const r15 = computeAllKinshipTitles('self', peop15, rels15, 'ENGLISH');
+  const t15 = computeAllKinshipTitles('self', peop15, rels15, 'TAMIL');
+
+  // Cross-cousins: father's sister's children
+  it("15: father's sister's son = crossCousinMale", () =>
+    expect(key(r15, 'cc_m')).toBe('crossCousinMale'));
+  it("15: father's sister's daughter = crossCousinFemale", () =>
+    expect(key(r15, 'cc_f')).toBe('crossCousinFemale'));
+  // Cross-cousins: mother's brother's children
+  it("15: mother's brother's son = crossCousinMale", () =>
+    expect(key(r15, 'cc_mb_m')).toBe('crossCousinMale'));
+  it("15: mother's brother's daughter = crossCousinFemale", () =>
+    expect(key(r15, 'cc_mb_f')).toBe('crossCousinFemale'));
+  // Parallel cousins: father's brother's children
+  it("15: father's brother's son = parallelCousinMale", () =>
+    expect(key(r15, 'pc_m')).toBe('parallelCousinMale'));
+  it("15: father's brother's daughter = parallelCousinFemale", () =>
+    expect(key(r15, 'pc_f')).toBe('parallelCousinFemale'));
+  // Parallel cousins: mother's sister's children
+  it("15: mother's sister's son = parallelCousinMale", () =>
+    expect(key(r15, 'pc_ms_m')).toBe('parallelCousinMale'));
+  it("15: mother's sister's daughter = parallelCousinFemale", () =>
+    expect(key(r15, 'pc_ms_f')).toBe('parallelCousinFemale'));
+
+  // Tamil scripts
+  it('15: Tamil — crossCousinMale script is அத்தான்', () =>
+    expect(t15['cc_m']?.title?.script).toBe('அத்தான்'));
+  it('15: Tamil — crossCousinFemale script is மச்சினி', () =>
+    expect(t15['cc_f']?.title?.script).toBe('மச்சினி'));
+  it('15: Tamil — parallelCousinMale script is சித்தன்', () =>
+    expect(t15['pc_m']?.title?.script).toBe('சித்தன்'));
+  it('15: Tamil — parallelCousinFemale script is சித்தி மகள்', () =>
+    expect(t15['pc_f']?.title?.script).toBe('சித்தி மகள்'));
 });

@@ -106,6 +106,15 @@ const TAMIL_TITLES = {
 
   cousin:               { script: 'உறவினர் குழந்தை', transliteration: 'Uṟaviṉar Kuḻantai', english: 'Cousin' },
 
+  crossCousinMale:    { script: 'அத்தான்',     transliteration: 'Attān',       english: 'Cross-cousin (male)' },
+  crossCousinFemale:  { script: 'மச்சினி',     transliteration: 'Macciṉi',     english: 'Cross-cousin (female)' },
+  parallelCousinMale:   { script: 'சித்தன்',     transliteration: 'Chittan',     english: 'Parallel Cousin (male)' },
+  parallelCousinFemale: { script: 'சித்தி மகள்', transliteration: 'Chitti Makaḷ', english: 'Parallel Cousin (female)' },
+
+  maternalGrandmotherAmmachi:  { script: 'அம்மாச்சி', transliteration: 'Ammācci', english: 'Grandmother (maternal)' },
+  paternalGrandmotherAmmachi:  { script: 'அம்மாச்சி', transliteration: 'Ammācci', english: 'Grandmother (paternal)' },
+  grandmotherAmmachi:          { script: 'அம்மாச்சி', transliteration: 'Ammācci', english: 'Grandmother' },
+
   relative:             { script: 'உறவினர்',       transliteration: 'Uṟaviṉar',   english: 'Relative' },
 };
 
@@ -247,7 +256,38 @@ function deriveExtended(graph, pathMap) {
 // ---------------------------------------------------------------------------
 // Step 5 — Title key from path string
 // ---------------------------------------------------------------------------
-function deriveTitleKey(path, targetPerson, perspectivePerson, biologicalMap, graph) {
+// ---------------------------------------------------------------------------
+// Cousin resolver — determines cross vs parallel cousin from graph
+// ---------------------------------------------------------------------------
+function resolveCousin(targetPerson, perspectivePerson, graph) {
+  const perspParents = graph[perspectivePerson.id]?.parents ?? [];
+  for (const { id: parentId } of perspParents) {
+    const parentNode = graph[parentId];
+    if (!parentNode) continue;
+    for (const { id: gpId } of (parentNode.parents ?? [])) {
+      const gpNode = graph[gpId];
+      if (!gpNode) continue;
+      for (const uaId of (gpNode.children ?? [])) {
+        if (uaId === parentId) continue;
+        const uaNode = graph[uaId];
+        if (!uaNode) continue;
+        if (uaNode.children.includes(targetPerson.id)) {
+          const parentGender = parentNode.person.gender;
+          const uaGender = uaNode.person.gender;
+          const isCross = parentGender && uaGender &&
+            parentGender !== 'OTHER' && uaGender !== 'OTHER' &&
+            parentGender !== uaGender;
+          const g = targetPerson.gender;
+          if (isCross) return g === 'MALE' ? 'crossCousinMale' : g === 'FEMALE' ? 'crossCousinFemale' : 'relative';
+          return g === 'MALE' ? 'parallelCousinMale' : g === 'FEMALE' ? 'parallelCousinFemale' : 'relative';
+        }
+      }
+    }
+  }
+  return 'cousin';
+}
+
+function deriveTitleKey(path, targetPerson, perspectivePerson, biologicalMap, graph, treeSettings) {
   const gender = targetPerson?.gender;
 
   switch (path) {
@@ -278,8 +318,13 @@ function deriveTitleKey(path, targetPerson, perspectivePerson, biologicalMap, gr
           break;
         }
       }
-      if (gender === 'MALE')   return bridgeGender === 'MALE' ? 'paternalGrandfather' : bridgeGender === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
-      if (gender === 'FEMALE') return bridgeGender === 'MALE' ? 'paternalGrandmother' : bridgeGender === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      if (gender === 'MALE') return bridgeGender === 'MALE' ? 'paternalGrandfather' : bridgeGender === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
+      if (gender === 'FEMALE') {
+        const variant = treeSettings?.grandmotherVariant ?? 'PATTI_BOTH';
+        if (variant === 'AMMACHI_BOTH') return bridgeGender === 'MALE' ? 'paternalGrandmotherAmmachi' : bridgeGender === 'FEMALE' ? 'maternalGrandmotherAmmachi' : 'grandmotherAmmachi';
+        if (variant === 'PATTI_AMMACHI') return bridgeGender === 'FEMALE' ? 'maternalGrandmotherAmmachi' : bridgeGender === 'MALE' ? 'paternalGrandmother' : 'grandmother';
+        return bridgeGender === 'MALE' ? 'paternalGrandmother' : bridgeGender === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      }
       return 'ancestor';
     }
     case 'parent.spouse': {
@@ -317,8 +362,13 @@ function deriveTitleKey(path, targetPerson, perspectivePerson, biologicalMap, gr
           }
         }
       }
-      if (gender === 'MALE')   return bridgeGender2 === 'MALE' ? 'paternalGrandfather' : bridgeGender2 === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
-      if (gender === 'FEMALE') return bridgeGender2 === 'MALE' ? 'paternalGrandmother' : bridgeGender2 === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      if (gender === 'MALE') return bridgeGender2 === 'MALE' ? 'paternalGrandfather' : bridgeGender2 === 'FEMALE' ? 'maternalGrandfather' : 'grandfather';
+      if (gender === 'FEMALE') {
+        const variant = treeSettings?.grandmotherVariant ?? 'PATTI_BOTH';
+        if (variant === 'AMMACHI_BOTH') return bridgeGender2 === 'MALE' ? 'paternalGrandmotherAmmachi' : bridgeGender2 === 'FEMALE' ? 'maternalGrandmotherAmmachi' : 'grandmotherAmmachi';
+        if (variant === 'PATTI_AMMACHI') return bridgeGender2 === 'FEMALE' ? 'maternalGrandmotherAmmachi' : bridgeGender2 === 'MALE' ? 'paternalGrandmother' : 'grandmother';
+        return bridgeGender2 === 'MALE' ? 'paternalGrandmother' : bridgeGender2 === 'FEMALE' ? 'maternalGrandmother' : 'grandmother';
+      }
       return 'ancestor';
     }
     case 'parent.parent.child': {
@@ -371,7 +421,7 @@ function deriveTitleKey(path, targetPerson, perspectivePerson, biologicalMap, gr
     case 'parent.parent.spouse.parent':
       return 'ancestor';
     case 'parent.parent.child.child':
-      return 'cousin';
+      return resolveCousin(targetPerson, perspectivePerson, graph);
     case 'parent.parent.child.spouse': {
       // targetPerson is the spouse of an uncle/aunt.
       const perspParentsUAS = graph[perspectivePerson?.id]?.parents ?? [];
@@ -472,7 +522,7 @@ function siblingKey(perspective, target) {
 // Main export: compute all kinship titles for a tree
 // Returns { [personId]: { kinshipKey: string | null, title: object | null } }
 // ---------------------------------------------------------------------------
-function computeKinship(people, relationships, perspectiveId, culture, titleOverrides = []) {
+function computeKinship(people, relationships, perspectiveId, culture, titleOverrides = [], treeSettings = {}) {
   const { graph, biologicalMap } = buildGraph(people, relationships);
 
   const overrideMap = {};
@@ -514,7 +564,7 @@ function computeKinship(people, relationships, perspectiveId, culture, titleOver
       continue;
     }
 
-    const titleKey = deriveTitleKey(path, person, perspectivePerson, biologicalMap, graph);
+    const titleKey = deriveTitleKey(path, person, perspectivePerson, biologicalMap, graph, treeSettings);
 
     if (!titleKey) {
       // Reachable but not specifically modelled → relative

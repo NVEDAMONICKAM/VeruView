@@ -49,6 +49,10 @@ export const deleteRelationship = (treeId, relId) =>
 export const patchNodePositions = (treeId, positions) =>
   api.patch(`/trees/${treeId}/node-positions`, { positions });
 
+// Duplicate a shared tree into logged-in user's account
+export const duplicateTree = (shareToken, newName) =>
+  api.post('/trees/duplicate', { shareToken, newName });
+
 // Shared (public) tree
 export const getSharedTree = (token) => api.get(`/share/${token}`);
 export const getSharedKinship = (token, perspectiveId) =>

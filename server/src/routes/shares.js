@@ -27,6 +27,8 @@ router.get('/:token', async (req, res) => {
       id: tree.id,
       name: tree.name,
       culture: tree.culture,
+      ownerId: tree.ownerId,
+      grandmotherVariant: tree.grandmotherVariant ?? 'PATTI_BOTH',
       people: tree.people,
       relationships: tree.relationships,
       titleOverrides: tree.titleOverrides,
@@ -57,7 +59,8 @@ router.get('/:token/kinship/:perspectiveId', async (req, res) => {
       tree.relationships,
       req.params.perspectiveId,
       tree.culture,
-      tree.titleOverrides
+      tree.titleOverrides,
+      { grandmotherVariant: tree.grandmotherVariant }
     );
     res.json(kinship);
   } catch (err) {

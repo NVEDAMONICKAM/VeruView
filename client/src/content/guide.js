@@ -224,6 +224,11 @@ export const GUIDE_CONTENT = {
             title: 'மாற்றானப்பன் / மாற்றாந்தாய் (Step-parent)',
             text: 'யாரையாவது step-parent ஆக குறிக்க, இணைப்பு கோடை கிளிக் செய்து "Step-parent" என்று தேர்ந்தெடுக்கவும்.',
           },
+          {
+            type: 'note',
+            title: 'பாட்டி vs அம்மாச்சி',
+            text: 'பாட்டி என்பது standard Tamil வார்த்தை. ஆனால் சில குடும்பங்களில் (குறிப்பாக Sri Lankan Tamil) அம்மாச்சி என்று சொல்வார்கள். Tree Settings sidebar-ல் உங்கள் குடும்பத்திற்கு சரியான வார்த்தையை தேர்ந்தெடுக்கலாம். The word for grandmother varies by region and family — choose between பாட்டி and அம்மாச்சி in the sidebar settings.',
+          },
         ],
       },
       {

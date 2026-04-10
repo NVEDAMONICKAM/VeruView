@@ -9,6 +9,7 @@ export default function Login() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const oauthError = params.get('error') === 'oauth';
+  const redirectTo = params.get('redirect') || '/';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,7 +24,7 @@ export default function Login() {
       const res = await login({ email, password });
       if (!res.data?.id) throw new Error('Invalid response');
       setUser(res.data);
-      navigate('/');
+      navigate(redirectTo);
     } catch (err) {
       setError(typeof err.response?.data?.error === 'string'
         ? err.response.data.error

@@ -341,6 +341,8 @@ export default function TreeCanvas({
   // Because it's a ref (not state), writes never trigger re-renders.
   positionsRef,
   onPositionsChange,
+  // Guide button callback
+  onGuideOpen,
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -489,17 +491,32 @@ export default function TreeCanvas({
         <Background color="#A8D5B5" gap={24} size={1} />
         <Controls />
 
-        {/* Undo / Redo — top-right */}
-        {!isReadOnly && (
-          <Panel position="top-right">
-            <UndoRedoButtons
-              onUndo={onUndo}
-              onRedo={onRedo}
-              canUndo={canUndo}
-              canRedo={canRedo}
-            />
-          </Panel>
-        )}
+        {/* Undo / Redo + Info — top-right */}
+        <Panel position="top-right">
+          <div className="flex items-center gap-2">
+            {!isReadOnly && (
+              <UndoRedoButtons
+                onUndo={onUndo}
+                onRedo={onRedo}
+                canUndo={canUndo}
+                canRedo={canRedo}
+              />
+            )}
+            {!isReadOnly && (
+              <div className="w-px h-6 bg-veru-mid flex-shrink-0" />
+            )}
+            {onGuideOpen && (
+              <button
+                onClick={onGuideOpen}
+                className="w-11 h-11 rounded-full bg-earth-warmWhite border border-veru-mid text-veru-dark hover:bg-veru-light transition-colors shadow-sm flex items-center justify-center text-base font-semibold"
+                aria-label="Open guide"
+                title="How to use VeruView"
+              >
+                ℹ
+              </button>
+            )}
+          </div>
+        </Panel>
 
         {/* Auto-organise — top-left */}
         {!isReadOnly && (

@@ -125,10 +125,14 @@ export default function TreeView() {
   // ---------------------------------------------------------------------------
   // Kinship — computed client-side
   // ---------------------------------------------------------------------------
+  const treeSettings = useMemo(() => ({
+    grandmotherVariant: tree?.grandmotherVariant ?? 'PATTI_BOTH',
+  }), [tree?.grandmotherVariant]);
+
   const kinship = useMemo(() => {
     if (!perspectiveId || !tree) return {};
-    return computeAllKinshipTitles(perspectiveId, people, relationships, tree.culture);
-  }, [perspectiveId, people, relationships, tree?.culture]);
+    return computeAllKinshipTitles(perspectiveId, people, relationships, tree.culture, treeSettings);
+  }, [perspectiveId, people, relationships, tree?.culture, treeSettings]);
 
   // ---------------------------------------------------------------------------
   // Load tree
@@ -441,6 +445,36 @@ export default function TreeView() {
             </button>
           ))}
         </div>
+        {tree?.culture === 'TAMIL' && (
+          <div className="p-3 border-t border-veru-light space-y-1.5">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 px-1">
+              Grandmother title
+            </p>
+            {[
+              { value: 'PATTI_BOTH',    label: 'பாட்டி for both' },
+              { value: 'PATTI_AMMACHI', label: 'பாட்டி · அம்மாச்சி' },
+              { value: 'AMMACHI_BOTH',  label: 'அம்மாச்சி for both' },
+            ].map(({ value, label }) => (
+              <label key={value} className="flex items-center gap-2 cursor-pointer px-1">
+                <input
+                  type="radio"
+                  name="grandmotherVariant"
+                  value={value}
+                  checked={(tree?.grandmotherVariant ?? 'PATTI_BOTH') === value}
+                  onChange={async () => {
+                    try {
+                      const { updateTree } = await import('../api/client');
+                      const res = await updateTree(tree.id, { grandmotherVariant: value });
+                      setTree(res.data);
+                    } catch { /* silently ignore */ }
+                  }}
+                  className="accent-veru-accent"
+                />
+                <span className="text-xs text-gray-700">{label}</span>
+              </label>
+            ))}
+          </div>
+        )}
         <div className="p-3 border-t border-veru-light">
           <p className="text-[10px] text-gray-400 text-center leading-snug">
             Click node to switch perspective · Double-click to edit
@@ -539,22 +573,10 @@ export default function TreeView() {
               onRedo={handleRedo}
               canUndo={canUndo}
               canRedo={canRedo}
+              onGuideOpen={() => setGuideOpen(true)}
             />
           )}
         </main>
-
-        {/* Info / Guide button — fixed bottom-right, above mobile FAB */}
-        <button
-          className="fixed bottom-24 right-6 sm:bottom-6 sm:right-20 z-30 w-11 h-11 rounded-full
-                     bg-earth-warmWhite border border-veru-mid text-veru-dark
-                     hover:bg-veru-light transition-colors shadow-md
-                     flex items-center justify-center text-base font-semibold"
-          onClick={() => setGuideOpen(true)}
-          aria-label="Open guide"
-          title="How to use VeruView"
-        >
-          ℹ
-        </button>
 
         {/* Mobile FAB */}
         <button

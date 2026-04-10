@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { register } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import VeruViewLogo from '../components/VeruViewLogo';
@@ -7,6 +7,8 @@ import VeruViewLogo from '../components/VeruViewLogo';
 export default function Register() {
   const { setUser } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const redirectTo = params.get('redirect') || '/';
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,7 +24,7 @@ export default function Register() {
       const res = await register({ name, email, password });
       if (!res.data?.id) throw new Error('Invalid response');
       setUser(res.data);
-      navigate('/');
+      navigate(redirectTo);
     } catch (err) {
       setError(typeof err.response?.data?.error === 'string'
         ? err.response.data.error
