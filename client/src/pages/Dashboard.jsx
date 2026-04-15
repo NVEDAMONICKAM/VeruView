@@ -1,11 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getTrees, createTree, deleteTree, logout } from '../api/client';
+import { getTrees, createTree, deleteTree, updateTree, logout } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import VeruViewLogo from '../components/VeruViewLogo';
 
-function TreeCard({ tree, onDelete }) {
+function TreeCard({ tree, onDelete, onRename }) {
   const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(tree.name);
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef(null);
 
   async function handleDelete(e) {
     e.preventDefault();
@@ -14,6 +18,31 @@ function TreeCard({ tree, onDelete }) {
     setDeleting(true);
     try { await onDelete(tree.id); }
     catch { setDeleting(false); }
+  }
+
+  function startEditing(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditName(tree.name);
+    setEditing(true);
+    setTimeout(() => inputRef.current?.select(), 0);
+  }
+
+  async function commitRename() {
+    const trimmed = editName.trim();
+    if (!trimmed || trimmed === tree.name) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      await onRename(tree.id, trimmed);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+    if (e.key === 'Escape') { setEditing(false); }
   }
 
   return (
@@ -30,9 +59,37 @@ function TreeCard({ tree, onDelete }) {
       </svg>
 
       <div className="pr-8">
-        <h3 className="font-semibold text-veru-dark text-base truncate" style={{ fontFamily: 'Georgia, serif' }}>
-          {tree.name}
-        </h3>
+        {editing ? (
+          <div onClick={(e) => e.preventDefault()} className="flex items-center gap-1">
+            <input
+              ref={inputRef}
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={handleKeyDown}
+              disabled={saving}
+              autoFocus
+              className="flex-1 min-w-0 border border-veru-accent rounded-md px-2 py-0.5 text-sm font-semibold text-veru-dark bg-white focus:outline-none focus:ring-1 focus:ring-veru-accent"
+              style={{ fontFamily: 'Georgia, serif' }}
+              onClick={(e) => e.preventDefault()}
+            />
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 group/title">
+            <h3 className="font-semibold text-veru-dark text-base truncate" style={{ fontFamily: 'Georgia, serif' }}>
+              {tree.name}
+            </h3>
+            <button
+              onClick={startEditing}
+              className="flex-shrink-0 p-0.5 rounded text-gray-300 hover:text-veru-accent opacity-0 group-hover/title:opacity-100 transition-opacity"
+              title="Rename tree"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 2l3 3-9 9H2v-3L11 2z"/>
+              </svg>
+            </button>
+          </div>
+        )}
         <div className="mt-1 flex items-center gap-2">
           <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full
             ${tree.culture === 'TAMIL'
@@ -104,6 +161,11 @@ export default function Dashboard() {
   async function handleDelete(treeId) {
     await deleteTree(treeId);
     setTrees((prev) => prev.filter((t) => t.id !== treeId));
+  }
+
+  async function handleRename(treeId, name) {
+    await updateTree(treeId, { name });
+    setTrees((prev) => prev.map((t) => t.id === treeId ? { ...t, name } : t));
   }
 
   async function handleLogout() {
@@ -221,7 +283,7 @@ export default function Dashboard() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {trees.map((tree) => (
-              <TreeCard key={tree.id} tree={tree} onDelete={handleDelete} />
+              <TreeCard key={tree.id} tree={tree} onDelete={handleDelete} onRename={handleRename} />
             ))}
           </div>
         )}
